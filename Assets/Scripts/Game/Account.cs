@@ -66,7 +66,12 @@ namespace Banjjak
             if (raw.Contains("password") && (raw.Contains("short") || raw.Contains("weak") || raw.Contains("at least"))) return "비밀번호는 6자 이상이어야 해요";
             if (raw.Contains("email_not_confirmed") || raw.Contains("not confirmed")) return "서버 설정에서 이메일 확인을 꺼야 해요 (관리자)";
             if (raw.Contains("rate limit") || raw.Contains("over_request_rate")) return "잠시 후 다시 시도해 주세요";
-            return "잠시 후 다시 시도해 주세요 (" + (int)r.responseCode + ")";
+            if (raw.Contains("email_provider_disabled") || raw.Contains("logins are disabled") || raw.Contains("signups are disabled")) return "서버에서 Email 로그인이 꺼져 있어요 (관리자)";
+            if (raw.Contains("signup_disabled") || raw.Contains("signups not allowed")) return "서버에서 회원가입이 꺼져 있어요 (관리자)";
+            if (raw.Contains("email_address_invalid")) return "이 아이디는 쓸 수 없어요. 다른 아이디를 써 주세요";
+            // unknown: show the server's own short reason so it can be fixed
+            string why = a != null ? (!string.IsNullOrEmpty(a.error_code) ? a.error_code : !string.IsNullOrEmpty(a.msg) ? a.msg : a.message) : null;
+            return "잠시 후 다시 시도해 주세요 (" + (int)r.responseCode + (string.IsNullOrEmpty(why) ? "" : " " + why) + ")";
         }
 
         // ------------------------------------------------------------------ auth

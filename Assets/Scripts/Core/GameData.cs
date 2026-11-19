@@ -42,7 +42,7 @@ namespace Banjjak
 
         static Dirt()
         {
-            Add("dust", "먼지", 1.0f, 0x9a8f78, 0x7b7262, .95f, .3f, .7f, 0xa39780);
+            Add("dust", "먼지", 1.0f, 0x84755b, 0x5f533f, .95f, .3f, .7f, 0xa39780);
             Add("pollen", "꽃가루", .8f, 0xd8b63a, 0xbf9e2a, .9f, .3f, .7f, 0xd9b83a);
             Add("mud", "진흙", 1.8f, 0x5e4631, 0x3d2d1f, 1f, .3f, .7f, 0x7a5a3c);
             Add("leaves", "낙엽 얼룩", 2.2f, 0x8a5326, 0x5a3416, .8f, .42f, .58f, 0x8a5326);
@@ -55,7 +55,7 @@ namespace Banjjak
             Add("algae", "녹조", 2.8f, 0x3a6a2c, 0x245a33, .3f, .3f, .7f, 0x3f7a35);
             Add("moss", "이끼", 3.6f, 0x4c6a30, 0x2b421f, .95f, .3f, .7f, 0x5d7f3a);
             Add("rust", "녹", 3.2f, 0x8e4a1f, 0x5c2c12, .85f, .3f, .7f, 0xa0562a);
-            Add("lime", "물때", 4.5f, 0xebe7dc, 0xcdc8b8, 1f, .3f, .7f, 0xd9d4c4);
+            Add("lime", "물때", 4.5f, 0xddd5bb, 0xb3a98c, 1f, .3f, .7f, 0xd9d4c4);
             Add("gum", "껌 자국", 7f, 0x3c3a37, 0x5a5753, .5f, .45f, .55f, 0x4a4744);
             Add("paint", "낙서", 10f, 0xe23d8f, 0x2d7be0, .5f, .47f, .53f, 0xe0559a);
         }

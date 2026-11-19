@@ -152,8 +152,9 @@ Shader "Banjjak/DirtLit"
                     float2 nuv = float2(wp.x + wp.z, wp.y + wp.z * 0.5) / 1.7;
                     float3 jt = SAMPLE_TEXTURE2D(_DirtNoise, my_linear_repeat_sampler, nuv * 11.0).rgb - 0.5;
                     jt = (jt + (SAMPLE_TEXTURE2D(_DirtNoise, my_linear_repeat_sampler, nuv * 23.0 + 0.5).gbr - 0.5) * 0.6) * _InvDims.xyz;
-                    float4 mk = SAMPLE_TEXTURE3D(_Mask3, my_linear_clamp_sampler, dtc + jt * 0.7);
-                    int dty = clamp((int)(SAMPLE_TEXTURE3D(_Type3, my_point_clamp_sampler, dtc + jt * 1.4).r * 255.0 + 0.5), 0, 15);
+                    // jitter the lookups so the 5 cm cell grid never shows as blocks along dirt edges
+                    float4 mk = SAMPLE_TEXTURE3D(_Mask3, my_linear_clamp_sampler, dtc + jt * 1.0);
+                    int dty = clamp((int)(SAMPLE_TEXTURE3D(_Type3, my_point_clamp_sampler, dtc + jt * 2.4).r * 255.0 + 0.5), 0, 15);
                     float dm = mk.r;
                     float wet = mk.g;
                     float fm = mk.b;
@@ -161,9 +162,19 @@ Shader "Banjjak/DirtLit"
                     float4 dp = _DP[dty];
                     float3 c1 = dty == 15 ? _PC1.rgb : _DC1[dty].rgb;
                     float3 c2 = dty == 15 ? _PC2.rgb : _DC2[dty].rgb;
-                    float dA = saturate((dm - 0.1) * 1.12 * (0.78 + 0.55 * nz.r));
-                    float3 dcol = lerp(c1, c2, smoothstep(dp.x, dp.y, nz.g)) * (0.85 + 0.3 * nz.b);
-                    col = lerp(col, dcol, dA);
+                    // Anything the game still counts as dirty (G.CleanT = 0.14) has to read clearly without the F
+                    // highlight: a crisp edge right at the threshold, at least ~45% cover just above it, full cover
+                    // from about 0.5. Below the threshold the surface looks clean.
+                    const float thr = 0.14;
+                    float edgeIn = smoothstep(thr - 0.012, thr + 0.03, dm);
+                    float dA = edgeIn * (0.42 + 0.48 * saturate((dm - thr) * 1.8));
+                    dA = saturate(dA * (0.86 + 0.28 * nz.r));
+                    float3 dcol = lerp(c1, c2, smoothstep(dp.x, dp.y, nz.g)) * (0.82 + 0.3 * nz.b);
+                    // grime darkens whatever shows through the dirt...
+                    col = lerp(col * (1.0 - 0.2 * dA), dcol, dA);
+                    // ...and a dark tide line marks where cleaning stopped
+                    float rim = edgeIn * (1.0 - smoothstep(thr + 0.03, thr + 0.2, dm));
+                    col *= 1.0 - 0.28 * rim;
                     col *= 1.0 - 0.3 * wet * (1.0 - dA);
 
                     float4 nz2 = SAMPLE_TEXTURE2D(_DirtNoise, my_linear_repeat_sampler, nuv * 5.0 + 0.37);
