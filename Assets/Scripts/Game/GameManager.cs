@@ -688,6 +688,19 @@ namespace Banjjak
                 var zero = new List<string>();
                 foreach (var o in Job.Objects) foreach (var c in o.Comps) if (c.Total == 0) zero.Add(o.Name + "/" + c.Name);
                 testLog.AppendLine($"{Job.Id}: build {bt:0.00}s, objects {Job.Objects.Count}, surfaces {Job.Surfs.Count}, cells {Job.Total}, zero-total comps: {(zero.Count == 0 ? "none" : string.Join(", ", zero))}");
+                // faces left out because something sits right in front of them (unreachable by the spray)
+                var hid = new List<(string n, int h, int t)>();
+                int hidAll = 0;
+                foreach (var o in Job.Objects) foreach (var c in o.Comps)
+                    {
+                        int h = 0; foreach (var s in c.Surfs) h += s.ContactHidden;
+                        hidAll += h;
+                        if (h > 0) hid.Add((o.Name + "/" + c.Name, h, c.Total));
+                    }
+                hid.Sort((a, b) => (b.h / (float)(b.h + b.t)).CompareTo(a.h / (float)(a.h + a.t)));
+                var top = new List<string>();
+                for (int k = 0; k < Mathf.Min(5, hid.Count); k++) top.Add($"{hid[k].n} {hid[k].h * 100f / (hid[k].h + hid[k].t):0}% ({hid[k].h})");
+                testLog.AppendLine($"  unreachable left out: {hidAll} cells; most: {(top.Count == 0 ? "none" : string.Join(", ", top))}");
             }
 
             // tower: inside the 2nd floor, then the lift against the front wall

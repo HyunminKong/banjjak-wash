@@ -26,7 +26,11 @@ namespace Banjjak
         [System.NonSerialized] public float[] Foam, Soak;
         [System.NonSerialized] public byte[] AgentId;
         [System.NonSerialized] public int Total, Remaining, Allow;
+        [System.NonSerialized] public int ContactHidden;   // cells left out because something sits right in front of them
         [System.NonSerialized] public bool Done;
+
+        /// <summary>A face with another collider closer than this along its normal can't be reached by the spray.</summary>
+        public const float ReachGap = .08f;
         [System.NonSerialized] public bool TexDirty;
 
         Texture3D tex, ttex;
@@ -86,6 +90,22 @@ namespace Banjjak
             foreach (var o in occ)
                 if (o.Owner != myId && (!o.GroundOnly || IsGround) && o.Bounds.Intersects(wbx)) rel.Add(o);
 
+            // Faces pressed against something else (a wall, a neighbour, a bush) can never be sprayed, so they get no
+            // dirt. Only colliders near this surface are worth a ray test.
+            var near = new List<Bounds>();
+            if (!IsGround)
+                foreach (var c in Physics.OverlapBox(wbx.center, wbx.extents, Quaternion.identity, Layers.SprayMask, QueryTriggerInteraction.Ignore))
+                    if (c.gameObject != gameObject) { var b = c.bounds; b.Expand(ReachGap * 2 + .02f); near.Add(b); }
+            bool Blocked(Vector3 p, Vector3 n)
+            {
+                bool close = false;
+                foreach (var b in near) if (b.Contains(p)) { close = true; break; }
+                if (!close) return false;
+                return Physics.Raycast(p + n * .004f, n, out var hit, ReachGap, Layers.SprayMask, QueryTriggerInteraction.Ignore)
+                    && hit.collider.gameObject != gameObject;
+            }
+            var contact = new List<int>();
+
             var rng = new Rng(Noise.HashStr(Job.Id) + (uint)(Seed * 7919));
             // pattern seed per object, so neighbouring zones of one floor join without a seam
             int seed = (int)(Noise.HashStr(Job.Id + Comp.Obj.Name) % 997);
@@ -118,12 +138,15 @@ namespace Banjjak
                     var PW = mw.MultiplyPoint3x4(P);
                     bool hidden = (!IsGround && PW.y < .03f) || (NW.y < -.6f && PW.y < 1.05f) || (NW.y > .5f && PW.y > G.HighY && !highOK);
                     if (!hidden) foreach (var o in rel) if (o.Contains(PW)) { hidden = true; break; }
+                    if (!hidden && near.Count > 0 && Blocked(PW, NW)) { hidden = true; if (Surf[k] == 0) contact.Add(k); }
                     if (hidden) { if (Surf[k] == 0) Surf[k] = 1; continue; }
                     Surf[k] = 2;
                     var gd = DirtPatterns.Gen(spec, PW, NW, (PW.y - y0) / ys, seed);
                     DirtAmt[k] = gd.amt; Type[k] = gd.type;
                 }
             }
+            ContactHidden = 0;
+            foreach (int k in contact) if (Surf[k] == 1) ContactHidden++;
             Dilate();
             RecountFromDirt();
             CreateTextures();
