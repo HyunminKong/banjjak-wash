@@ -91,9 +91,11 @@ namespace Banjjak
             BuildPause();
             BuildResult();
             BuildMenu();
+            BuildLogin();
             RefreshTools();
             OnJobChanged();
             OnModeChanged();
+            RefreshAccount();
         }
 
         Button Btn(RectTransform parent, string label, Vector2 anchor, Vector2 pivot, Vector2 pos, Vector2 size, Color bg, Color fg, UnityEngine.Events.UnityAction onClick, int fontSize = 16)
@@ -126,6 +128,8 @@ namespace Banjjak
             menuMoney = Label(head, "", 26, Color.white, TextAnchor.MiddleRight, A(1, 1), A(1, 1), A(0, -6), A(300, 40), true);
             var tj = Btn(head, "의뢰", A(1, 1), A(1, 1), A(-128, -56), A(120, 36), Accent, Color.white, () => ShowShop(false), 15);
             var ts = Btn(head, "장비 가게", A(1, 1), A(1, 1), A(0, -56), A(120, 36), G.Hex(0xeef2f7), Ink, () => ShowShop(true), 15);
+            accountBtn = Btn(head, "", A(1, 1), A(1, 1), A(-312, -8), A(230, 34), new Color(1, 1, 1, .16f), Color.white, OnAccountButton, 14);
+            accountText = accountBtn.GetComponentInChildren<Text>();
             tabJobs = (Image)tj.targetGraphic; tabShop = (Image)ts.targetGraphic;
             tabJobsT = tj.GetComponentInChildren<Text>(); tabShopT = ts.GetComponentInChildren<Text>();
             var cr = Box("cards", p, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(0, 0));
@@ -265,7 +269,7 @@ namespace Banjjak
                 var c = cards[i];
                 var d = JobDefs.All[i];
                 bool unlocked = gm.Unlocked(i), done = gm.IsDone(i);
-                float prog = i == gm.JobIndex && gm.Job != null ? gm.Job.Progress : GameManager.SavedProgress(d.Id);
+                float prog = i == gm.JobIndex && gm.Job != null ? gm.Job.Progress : gm.SavedProgress(d.Id);
                 bool inProgress = !(i == gm.JobIndex && gm.Job != null && gm.Job.Completed) && prog > .001f;
                 c.button.interactable = unlocked;
                 if (!unlocked) { c.btnText.text = "잠김"; c.btn.color = G.Hex(0xc3cad3); c.state.text = "이전 의뢰를 먼저 끝내세요"; }
@@ -281,6 +285,92 @@ namespace Banjjak
             jobName.text = gm.Job.Name;
             if (pauseDesc != null) pauseDesc.text = gm.Job.Name + " — " + gm.Job.Desc;
             resultPanel.SetActive(false);
+        }
+
+        // ------------------------------------------------------------------ account
+        Button accountBtn; Text accountText;
+        GameObject loginPanel;
+        InputField idField, pwField;
+        Text loginMsg;
+        Button loginBtn, signupBtn;
+        int loginClosedFrame = -1;
+        public bool LoginBlocksEsc => (loginPanel != null && loginPanel.activeSelf) || loginClosedFrame == Time.frameCount;
+
+        void OnAccountButton()
+        {
+            if (gm.Acct.LoggedIn) { gm.Logout(); RefreshAccount(); return; }
+            loginMsg.text = "";
+            loginPanel.SetActive(true);
+            idField.ActivateInputField();
+        }
+
+        public void RefreshAccount()
+        {
+            if (accountBtn == null) return;
+            accountBtn.gameObject.SetActive(CloudConfig.Enabled);
+            accountText.text = gm.Acct.LoggedIn ? $"{gm.Acct.Username} · 로그아웃" : "로그인 / 회원가입";
+        }
+
+        InputField Field(RectTransform parent, float y, string placeholder, bool password)
+        {
+            var rt = Box("field", parent, A(.5f, 1), A(.5f, 1), A(0, y), A(340, 44));
+            var img = Panel(rt, G.Hex(0xf1f4f8));
+            img.raycastTarget = true;
+            var text = Label(rt, "", 16, Ink, TextAnchor.MiddleLeft, A(0, .5f), A(0, .5f), A(14, 0), A(312, 40));
+            text.supportRichText = false;
+            text.horizontalOverflow = HorizontalWrapMode.Wrap;
+            var ph = Label(rt, placeholder, 14, new Color(Sub.r, Sub.g, Sub.b, .75f), TextAnchor.MiddleLeft, A(0, .5f), A(0, .5f), A(14, 0), A(312, 40));
+            var input = rt.gameObject.AddComponent<InputField>();
+            input.textComponent = text;
+            input.placeholder = ph;
+            input.targetGraphic = img;
+            input.lineType = InputField.LineType.SingleLine;
+            input.contentType = password ? InputField.ContentType.Password : InputField.ContentType.Standard;
+            input.characterLimit = password ? 64 : 20;
+            return input;
+        }
+
+        void BuildLogin()
+        {
+            var p = Box("login", root, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(0, 0));
+            p.anchorMin = A(0, 0); p.anchorMax = A(1, 1); p.sizeDelta = A(0, 0);
+            loginPanel = p.gameObject;
+            var bg = p.gameObject.AddComponent<Image>(); bg.color = new Color(.03f, .05f, .08f, .55f); bg.raycastTarget = true;
+            var card = Box("card", p, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(420, 392));
+            Panel(card, new Color(1, 1, 1, .98f));
+            Label(card, "계정", 13, Accent, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(40, -20), A(200, 20), true);
+            Label(card, "로그인 · 회원가입", 24, Ink, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(40, -40), A(340, 32), true);
+            var d = Label(card, "로그인하면 진행도가 계정에 저장돼서 다른 컴퓨터에서도 이어서 할 수 있어요. 처음이면 아이디와 비밀번호를 정하고 회원가입을 누르세요.", 13, Sub, TextAnchor.UpperLeft, A(0, 1), A(0, 1), A(40, -82), A(340, 56));
+            d.horizontalOverflow = HorizontalWrapMode.Wrap;
+            idField = Field(card, -146, "아이디 (영문·숫자·_ 3~20자)", false);
+            pwField = Field(card, -200, "비밀번호 (6자 이상)", true);
+            loginMsg = Label(card, "", 13, Sub, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(40, -254), A(340, 22), true);
+            loginBtn = Btn(card, "로그인", A(.5f, 0), A(.5f, 0), A(-87, 56), A(166, 46), Accent, Color.white, () => SubmitLogin(false), 16);
+            signupBtn = Btn(card, "회원가입", A(.5f, 0), A(.5f, 0), A(87, 56), A(166, 46), G.Hex(0x30a46c), Color.white, () => SubmitLogin(true), 16);
+            Btn(card, "닫기", A(.5f, 0), A(.5f, 0), A(0, 14), A(120, 32), new Color(1, 1, 1, 0), Sub, () => loginPanel.SetActive(false), 13);
+            loginPanel.SetActive(false);
+        }
+
+        void SubmitLogin(bool signUp)
+        {
+            if (gm.Acct.Busy) return;
+            loginMsg.color = Sub;
+            loginMsg.text = signUp ? "가입하는 중…" : "로그인하는 중…";
+            loginBtn.interactable = signupBtn.interactable = false;
+            gm.SubmitLogin(idField.text, pwField.text, signUp, (ok, msg) =>
+            {
+                loginBtn.interactable = signupBtn.interactable = true;
+                loginMsg.color = ok ? Good : G.Hex(0xe5484d);
+                loginMsg.text = msg;
+                if (ok) { pwField.text = ""; StartCoroutine(CloseLoginSoon()); }
+                RefreshAccount();
+            });
+        }
+
+        System.Collections.IEnumerator CloseLoginSoon()
+        {
+            yield return new WaitForSecondsRealtime(1.1f);
+            loginPanel.SetActive(false);
         }
 
         public void OnModeChanged()
@@ -555,6 +645,14 @@ namespace Banjjak
         {
             // narrow / tall windows (e.g. a browser side pane) scale by width so nothing is cut off
             if (scaler != null) scaler.matchWidthOrHeight = (float)Screen.width / Mathf.Max(1, Screen.height) < 1.5f ? 0f : .5f;
+            if (loginPanel != null && loginPanel.activeSelf)
+            {
+                var kb = Keyboard.current;
+                if (kb != null && (kb.enterKey.wasPressedThisFrame || kb.numpadEnterKey.wasPressedThisFrame)) SubmitLogin(false);
+                if (kb != null && kb.tabKey.wasPressedThisFrame) { if (idField.isFocused) pwField.ActivateInputField(); else idField.ActivateInputField(); }
+                if (kb != null && kb.escapeKey.wasPressedThisFrame) { loginPanel.SetActive(false); loginClosedFrame = Time.frameCount; }
+                if (gm.Mode != GameMode.Menu) loginPanel.SetActive(false);
+            }
             if (gm == null || gm.Job == null) return;
             var j = gm.Job;
             float p = j.Progress;

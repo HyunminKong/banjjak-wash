@@ -22,6 +22,14 @@ namespace Banjjak
         public List<string> Owned = new List<string>();
         public int Robots, TrashBots, Drones, MowBots;
         public int Tool;
+        public List<JobProg> Prog = new List<JobProg>();
+    }
+
+    [Serializable]
+    public class JobProg
+    {
+        public string Id;
+        public float P;
     }
 
     public enum GameMode { Menu, Playing, Paused, Result }
@@ -95,6 +103,7 @@ namespace Banjjak
             Washer.Refresh();
             SetMode(GameMode.Menu);
             if (autotestDir != null) StartCoroutine(AutoTest());
+            else if (CloudConfig.Enabled && PlayerPrefs.HasKey("banjjak-refresh")) StartCoroutine(AutoLogin());
         }
 
         // ------------------------------------------------------------------ shop
@@ -225,7 +234,19 @@ namespace Banjjak
         // ------------------------------------------------------------------ jobs
         public bool Unlocked(int i) => i == 0 || Save.Done.Contains(JobDefs.All[i - 1].Id) || Save.Done.Contains(JobDefs.All[i].Id);
         public bool IsDone(int i) => Save.Done.Contains(JobDefs.All[i].Id);
-        public static float SavedProgress(string id) => PlayerPrefs.GetFloat("banjjak-prog-" + id, 0);
+        public float SavedProgress(string id)
+        {
+            var e = Save.Prog.Find(x => x.Id == id);
+            if (e != null) return e.P;
+            return UseCloud ? 0 : PlayerPrefs.GetFloat("banjjak-prog-" + id, 0);
+        }
+
+        void SetProg(string id, float p)
+        {
+            var e = Save.Prog.Find(x => x.Id == id);
+            if (e == null) Save.Prog.Add(e = new JobProg { Id = id });
+            e.P = p;
+        }
 
         /// <summary>Tear down the current job (saving it) and build another one.</summary>
         public float StartJob(int index, bool fresh = false)
@@ -243,8 +264,8 @@ namespace Banjjak
             JobIndex = index;
             Job = JobDefs.Create(index, IsDone(index) ? .5f : 1f);
             Job.Finish();
-            if (fresh) Job.ClearProgress();
-            bool loaded = autotestDir == null && !fresh && Job.LoadProgress();
+            if (fresh) ClearJobSave(Job.Id);
+            bool loaded = autotestDir == null && !fresh && Job.Apply(ReadJobSave(Job.Id));
             Job.CompDone += (c, pay) => { AddMoney(pay); if (!c.Obj.Done) Toast($"{c.Obj.Name} · {c.Name}", "+" + G.Money(pay), ToastKind.Normal); Ding(false); };
             Job.ObjectDone += (o, pay) => { Toast($"{o.Name} 완료!", "+" + G.Money(pay), ToastKind.Big); Ding(true); };
             Job.JobDone += bonus => OnJobDone(bonus);
@@ -260,8 +281,8 @@ namespace Banjjak
         void OnJobDone(float bonus)
         {
             AddMoney(bonus);
-            Job.ClearProgress();
-            PlayerPrefs.SetFloat("banjjak-prog-" + Job.Id, 0);
+            ClearJobSave(Job.Id);
+            SetProg(Job.Id, 0);
             if (!Save.Done.Contains(Job.Id)) Save.Done.Add(Job.Id);
             PersistSave();
             StartCoroutine(ShowResultLater(bonus));
@@ -426,7 +447,7 @@ namespace Banjjak
                         if (kb.escapeKey.wasPressedThisFrame || (mouse.leftButton.wasPressedThisFrame && !overUI)) SetMode(GameMode.Playing);
                         break;
                     case GameMode.Menu:
-                        if (kb.escapeKey.wasPressedThisFrame && Job != null) SetMode(GameMode.Paused);
+                        if (kb.escapeKey.wasPressedThisFrame && Job != null && !Hud.LoginBlocksEsc) SetMode(GameMode.Paused);
                         break;
                     case GameMode.Result:
                         if (kb.escapeKey.wasPressedThisFrame) SetMode(GameMode.Menu);
@@ -436,6 +457,11 @@ namespace Banjjak
             }
             saveT += dt;
             if (saveT > 15 && Job != null && Job.Changed && autotestDir == null) { saveT = 0; SaveAll(); }
+            if (profileDirty && UseCloud && Time.realtimeSinceStartup - profilePushT > 3)
+            {
+                profileDirty = false; profilePushT = Time.realtimeSinceStartup;
+                StartCoroutine(Acct.PushProfile(JsonUtility.ToJson(Save)));
+            }
         }
 
         void LateUpdate()
@@ -500,24 +526,142 @@ namespace Banjjak
 
         void LoadSave()
         {
+            Save = new SaveData();
             var s = PlayerPrefs.GetString(SaveKey, "");
             if (!string.IsNullOrEmpty(s)) { try { Save = JsonUtility.FromJson<SaveData>(s) ?? new SaveData(); } catch { Save = new SaveData(); } }
+            FixSave();
+        }
+
+        void FixSave()
+        {
             if (Save.Done == null) Save.Done = new List<string>();
             if (Save.Owned == null) Save.Owned = new List<string>();
+            if (Save.Prog == null) Save.Prog = new List<JobProg>();
             if (string.IsNullOrEmpty(Save.Current)) Save.Current = "patio";
+            Save.Washer = Mathf.Clamp(Save.Washer, 0, Washers.All.Length - 1);
+            Save.Agent = Mathf.Clamp(Save.Agent, 0, Agents.All.Count - 1);
         }
+
+        bool profileDirty;
+        float profilePushT;
 
         void PersistSave()
         {
             if (autotestDir != null) return;
+            if (UseCloud) { profileDirty = true; return; }   // pushed by Update, a few seconds apart
             PlayerPrefs.SetString(SaveKey, JsonUtility.ToJson(Save));
             PlayerPrefs.Save();
         }
 
         void SaveJob()
         {
-            Job.SaveProgress();
-            PlayerPrefs.SetFloat("banjjak-prog-" + Job.Id, Job.Progress);
+            var raw = Job.Serialize();
+            if (UseCloud) StartCoroutine(Acct.PushJob(Job.Id, Convert.ToBase64String(raw)));
+            else Job.SaveLocal(raw);
+            Job.Changed = false;
+            SetProg(Job.Id, Job.Progress);
+            PersistSave();
+        }
+
+        byte[] ReadJobSave(string id)
+        {
+            if (UseCloud) return Acct.JobCache.TryGetValue(id, out var b64) && !string.IsNullOrEmpty(b64) ? Convert.FromBase64String(b64) : null;
+            return CleanJob.ReadLocal(id);
+        }
+
+        void ClearJobSave(string id)
+        {
+            if (UseCloud) StartCoroutine(Acct.DeleteJob(id));
+            else CleanJob.ClearLocal(id);
+        }
+
+        // ------------------------------------------------------------------ accounts (Supabase)
+        public readonly Account Acct = new Account();
+        /// <summary>True once the account's data is in memory. Until then (while signing in) everything still saves to this device.</summary>
+        bool acctReady;
+        public bool UseCloud => CloudConfig.Enabled && Acct.LoggedIn && acctReady;
+
+        /// <summary>Called by the login panel. report(ok, message).</summary>
+        public void SubmitLogin(string name, string pw, bool signUp, Action<bool, string> report)
+        {
+            if (!CloudConfig.Enabled) { report(false, "아직 서버가 연결되지 않았어요"); return; }
+            if (Acct.Busy) return;
+            name = (name ?? "").Trim();
+            if (!Account.ValidName(name)) { report(false, "아이디는 영문·숫자·_ 3~20자예요"); return; }
+            if ((pw ?? "").Length < 6) { report(false, "비밀번호는 6자 이상이어야 해요"); return; }
+            // keep the guest's current job safe on this device before switching to the account
+            if (!UseCloud && Job != null && Job.Changed && !Job.Completed) SaveJob();
+            System.Action<bool, string> after = (ok, msg) =>
+            {
+                if (!ok) { report(false, msg); return; }
+                StartCoroutine(AfterLogin(signUp, report));
+            };
+            StartCoroutine(signUp ? Acct.SignUp(name, pw, after) : Acct.Login(name, pw, after));
+        }
+
+        IEnumerator AfterLogin(bool signUp, Action<bool, string> report)
+        {
+            acctReady = false;
+            string profile = null; bool ok = false;
+            yield return Acct.Pull((k, p) => { ok = k; profile = p; });
+            if (!Acct.LoggedIn) yield break;   // logged out while loading
+            if (!ok) { report?.Invoke(false, "계정 정보를 불러오지 못했어요"); Acct.Logout(); Hud?.RefreshAccount(); yield break; }
+            // still the guest here (acctReady is false): keep the guest's job on this device, never in the account
+            if (Job != null && Job.Changed && !Job.Completed) SaveJob();
+            if (!string.IsNullOrEmpty(profile) && profile != "{}")
+            {
+                try { Save = JsonUtility.FromJson<SaveData>(profile) ?? new SaveData(); } catch { Save = new SaveData(); }
+                FixSave();
+                report?.Invoke(true, $"{Acct.Username} 님, 어서 오세요");
+            }
+            else
+            {
+                // brand-new account: carry this device's guest progress into it
+                foreach (var d in JobDefs.All)
+                {
+                    var raw = CleanJob.ReadLocal(d.Id);
+                    if (raw != null) yield return Acct.PushJob(d.Id, Convert.ToBase64String(raw));
+                }
+                yield return Acct.PushProfile(JsonUtility.ToJson(Save));
+                report?.Invoke(true, signUp ? "가입 완료! 이 기기의 진행도를 계정에 옮겼어요" : "계정에 진행도를 저장했어요");
+            }
+            if (!Acct.LoggedIn) { LoadSave(); yield break; }   // logged out while migrating: back to the guest save
+            if (Job != null) Job.Changed = false;   // the guest job is already stored on this device; don't push it to the account
+            profileDirty = false;
+            acctReady = true;
+            ReloadAfterProfileChange();
+            Toast($"{Acct.Username} 계정으로 저장돼요", "다른 컴퓨터에서도 로그인하면 이어서 할 수 있어요", ToastKind.Info);
+        }
+
+        public void Logout()
+        {
+            if (!Acct.LoggedIn) return;
+            if (Job != null && Job.Changed && !Job.Completed) SaveJob();
+            if (profileDirty) StartCoroutine(Acct.PushProfile(JsonUtility.ToJson(Save)));
+            profileDirty = false;
+            acctReady = false;
+            Acct.Logout();
+            if (Job != null) Job.Changed = false;   // just saved to the account; don't copy it into this device's guest save
+            LoadSave();
+            ReloadAfterProfileChange();
+            Toast("로그아웃했어요", "지금부터는 이 기기에만 저장돼요", ToastKind.Info);
+        }
+
+        void ReloadAfterProfileChange()
+        {
+            Robots.RemoveAll();
+            StartJob(Mathf.Max(0, JobDefs.IndexOf(Save.Current)));
+            Washer.Refresh();
+            Hud?.OnModeChanged();
+            Hud?.RefreshAccount();
+        }
+
+        IEnumerator AutoLogin()
+        {
+            bool ok = false;
+            yield return Acct.Refresh(k => ok = k);
+            if (ok) yield return AfterLogin(false, null);
+            Hud?.RefreshAccount();
         }
 
         void SaveAll()

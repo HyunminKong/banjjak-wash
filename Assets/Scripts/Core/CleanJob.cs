@@ -356,19 +356,16 @@ namespace Banjjak
             foreach (var s in Surfs) if (s.TexDirty) s.Upload();
         }
 
-        // ---------- progress save: 4-bit dirt per counted voxel, gzip ----------
-        string SavePath => Path.Combine(Application.persistentDataPath, "job-" + Id + ".bin");
-
-        // Desktop: gzip file in persistentDataPath. Browser (WebGL): GZipStream needs a native library that
-        // isn't there, so the raw 4-bit data goes into PlayerPrefs (IndexedDB) as base64 instead.
+        // ---------- progress save: 4-bit dirt per counted voxel ----------
+        // Stored either locally (desktop: gzip file, browser: PlayerPrefs/IndexedDB because GZipStream needs a
+        // native library WebGL lacks) or in the player's cloud account (GameManager decides).
         static bool Web => Application.platform == RuntimePlatform.WebGLPlayer;
-        string PrefKey => "banjjak-job-" + Id;
+        static string SavePathFor(string id) => Path.Combine(Application.persistentDataPath, "job-" + id + ".bin");
+        static string PrefKeyFor(string id) => "banjjak-job-" + id;
 
-        public void SaveProgress()
+        public byte[] Serialize()
         {
-            try
-            {
-                byte[] raw;
+            byte[] raw;
                 using (var ms = new MemoryStream())
                 {
                     using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, true))
@@ -400,47 +397,59 @@ namespace Banjjak
                     }
                     raw = ms.ToArray();
                 }
-                if (Web)
-                {
-                    PlayerPrefs.SetString(PrefKey, Convert.ToBase64String(raw));
-                    PlayerPrefs.Save();
-                }
+            return raw;
+        }
+
+        public void SaveLocal(byte[] raw)
+        {
+            try
+            {
+                if (Web) { PlayerPrefs.SetString(PrefKeyFor(Id), Convert.ToBase64String(raw)); PlayerPrefs.Save(); }
                 else
                 {
                     using (var ms = new MemoryStream())
                     {
                         using (var gz = new GZipStream(ms, System.IO.Compression.CompressionLevel.Fastest, true)) gz.Write(raw, 0, raw.Length);
-                        File.WriteAllBytes(SavePath, ms.ToArray());
+                        File.WriteAllBytes(SavePathFor(Id), ms.ToArray());
                     }
                 }
-                Changed = false;
             }
             catch (Exception e) { Debug.LogWarning("[Banjjak] save failed: " + e.Message); }
         }
 
-        byte[] ReadSaved()
-        {
-            if (Web)
-            {
-                var s = PlayerPrefs.GetString(PrefKey, "");
-                return string.IsNullOrEmpty(s) ? null : Convert.FromBase64String(s);
-            }
-            if (!File.Exists(SavePath)) return null;
-            using (var fs = File.OpenRead(SavePath))
-            using (var gz = new GZipStream(fs, CompressionMode.Decompress))
-            using (var ms = new MemoryStream())
-            {
-                gz.CopyTo(ms);
-                return ms.ToArray();
-            }
-        }
-
-        public bool LoadProgress()
+        public static byte[] ReadLocal(string id)
         {
             try
             {
-                var raw = ReadSaved();
-                if (raw == null) return false;
+                if (Web)
+                {
+                    var s = PlayerPrefs.GetString(PrefKeyFor(id), "");
+                    return string.IsNullOrEmpty(s) ? null : Convert.FromBase64String(s);
+                }
+                if (!File.Exists(SavePathFor(id))) return null;
+                using (var fs = File.OpenRead(SavePathFor(id)))
+                using (var gz = new GZipStream(fs, CompressionMode.Decompress))
+                using (var ms = new MemoryStream())
+                {
+                    gz.CopyTo(ms);
+                    return ms.ToArray();
+                }
+            }
+            catch (Exception e) { Debug.LogWarning("[Banjjak] read failed: " + e.Message); return null; }
+        }
+
+        public static void ClearLocal(string id)
+        {
+            if (Web) { PlayerPrefs.DeleteKey(PrefKeyFor(id)); PlayerPrefs.Save(); return; }
+            try { if (File.Exists(SavePathFor(id))) File.Delete(SavePathFor(id)); } catch { }
+        }
+
+        /// <summary>Apply saved progress bytes to this freshly built job.</summary>
+        public bool Apply(byte[] raw)
+        {
+            if (raw == null) return false;
+            try
+            {
                 using (var r = new BinaryReader(new MemoryStream(raw)))
                 {
                     int ver = r.ReadInt32();
@@ -505,12 +514,6 @@ namespace Banjjak
             var bits = new bool[n];
             for (int i = 0; i < n; i++) bits[i] = (b[i >> 3] & (1 << (i & 7))) != 0;
             return bits;
-        }
-
-        public void ClearProgress()
-        {
-            if (Web) { PlayerPrefs.DeleteKey(PrefKey); PlayerPrefs.Save(); return; }
-            try { if (File.Exists(SavePath)) File.Delete(SavePath); } catch { }
         }
     }
 }

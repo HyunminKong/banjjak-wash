@@ -4,7 +4,9 @@
 
 **▶ 바로 플레이: https://hyunminkong.github.io/banjjak-wash/**
 
-PC의 크롬이나 엣지에서 키보드와 마우스로 플레이해요. 처음 열 때 수십 MB를 받아서 몇 초 걸려요. 진행 상황은 브라우저에 저장돼요.
+PC의 크롬이나 엣지에서 키보드와 마우스로 플레이해요. 처음 열 때 수십 MB를 받아서 몇 초 걸려요.
+
+진행 상황은 로그인하지 않으면 이 브라우저에만 저장돼요. 메뉴 오른쪽 위 **로그인 / 회원가입**에서 아이디(영문·숫자 3~20자)와 비밀번호(6자 이상)로 가입하면 어느 컴퓨터에서든 이어서 할 수 있어요. 처음 가입할 때 이 브라우저에 있던 진행 상황은 계정으로 옮겨져요. 비밀번호 찾기는 없으니 잊지 마세요.
 
 ![벽돌 담장 분사](Screenshots/02_spray_wall.png)
 
@@ -40,6 +42,7 @@ PC의 크롬이나 엣지에서 키보드와 마우스로 플레이해요. 처�
 - 에디터 메뉴 `반짝 워시` → `Windows 빌드` 또는 `웹(WebGL) 빌드`
 - 처음 열 때는 `반짝 워시` → `프로젝트 설정 다시 적용`, `텍스처 다시 굽기`를 한 번 실행해 주세요.
 - 모든 모델과 텍스처는 코드로 만들어요 (`Assets/Scripts/Build`).
+- 계정 저장은 Supabase를 써요. 내 프로젝트로 바꾸려면 SQL Editor에서 `Supabase/setup.sql`을 실행하고, Authentication → Email에서 Confirm email을 끄고, `Assets/Scripts/Game/Account.cs`의 `CloudConfig`에 Project URL과 publishable 키를 넣으세요. 둘 다 비워 두면 로그인 버튼 없이 브라우저 저장만 써요. secret 키는 절대 넣지 마세요.
 
 ## 크레딧
 
