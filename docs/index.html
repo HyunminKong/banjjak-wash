@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>반짝 워시</title>
+  <link rel="icon" href="TemplateData/favicon.ico">
+  <style>
+    :root { --bg: #0e141b; --card: #ffffff; --ink: #1c2430; --sub: #5b6573; --accent: #2f80ed; }
+    html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+    #game { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; }
+    #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 35%, #1f3247, var(--bg) 70%); transition: opacity .4s; }
+    #loading.done { opacity: 0; pointer-events: none; }
+    .card { width: min(420px, calc(100vw - 32px)); background: var(--card); border-radius: 18px; padding: 28px 28px 24px; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+    .kicker { color: var(--accent); font-weight: 700; font-size: 13px; margin: 0 0 4px; }
+    h1 { margin: 0 0 6px; color: var(--ink); font-size: 32px; }
+    .desc { margin: 0 0 20px; color: var(--sub); font-size: 14px; line-height: 1.5; }
+    .bar { height: 8px; border-radius: 6px; background: #e6ebf1; overflow: hidden; }
+    .fill { height: 100%; width: 0; background: var(--accent); border-radius: 6px; transition: width .2s; }
+    .pct { margin: 10px 0 0; color: var(--sub); font-size: 13px; }
+    .note { margin: 16px 0 0; padding: 10px 12px; border-radius: 10px; background: #fff4e5; color: #8a5300; font-size: 13px; display: none; }
+    .err { background: #ffe8e8; color: #a32020; }
+  </style>
+</head>
+<body>
+  <canvas id="game" tabindex="-1"></canvas>
+  <div id="loading">
+    <div class="card">
+      <p class="kicker">혼자 하는 고압세척</p>
+      <h1>반짝 워시</h1>
+      <p class="desc">PC의 크롬이나 엣지에서 키보드와 마우스로 플레이해요. 처음에는 20MB 정도를 받아서 잠시 걸려요.</p>
+      <div class="bar"><div class="fill" id="fill"></div></div>
+      <p class="pct" id="pct">불러오는 중… 0%</p>
+      <p class="note" id="note"></p>
+    </div>
+  </div>
+  <script>
+    var canvas = document.getElementById("game");
+    var note = document.getElementById("note");
+    function showNote(msg, isError) {
+      note.textContent = msg;
+      note.className = "note" + (isError ? " err" : "");
+      note.style.display = "block";
+    }
+    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+      showNote("휴대폰에서는 조작이 안 돼요. PC 브라우저에서 열어 주세요.", false);
+    }
+    var buildUrl = "Build";
+    var config = {
+      arguments: [],
+      dataUrl: buildUrl + "/WebGL.data.unityweb",
+      frameworkUrl: buildUrl + "/WebGL.framework.js.unityweb",
+      codeUrl: buildUrl + "/WebGL.wasm.unityweb",
+      streamingAssetsUrl: "StreamingAssets",
+      companyName: "Banjjak",
+      productName: "Banjjak Wash",
+      productVersion: "1.0",
+      devicePixelRatio: Math.min(window.devicePixelRatio || 1, 1.5),
+      showBanner: function (msg, type) { if (type === "error") showNote(msg, true); },
+    };
+    var script = document.createElement("script");
+    script.src = buildUrl + "/WebGL.loader.js";
+    script.onload = function () {
+      createUnityInstance(canvas, config, function (progress) {
+        var p = Math.round(progress * 100);
+        document.getElementById("fill").style.width = p + "%";
+        document.getElementById("pct").textContent = "불러오는 중… " + p + "%";
+      }).then(function () {
+        document.getElementById("loading").className = "done";
+        canvas.focus();
+      }).catch(function (message) {
+        showNote("게임을 시작하지 못했어요: " + message, true);
+      });
+    };
+    script.onerror = function () { showNote("게임 파일을 불러오지 못했어요. 새로고침해 주세요.", true); };
+    document.body.appendChild(script);
+  </script>
+</body>
+</html>
