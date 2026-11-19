@@ -39,7 +39,7 @@ namespace Banjjak.EditorTools
         {
             PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Gzip;
             PlayerSettings.WebGL.decompressionFallback = true;
-            PlayerSettings.WebGL.dataCaching = true;
+            PlayerSettings.WebGL.dataCaching = false;   // the page asks for "no-store" anyway; see WebPage/index.html
             PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.ExplicitlyThrownExceptionsOnly;
             PlayerSettings.WebGL.initialMemorySize = 256;
             PlayerSettings.WebGL.maximumMemorySize = 2048;
@@ -55,8 +55,11 @@ namespace Banjjak.EditorTools
                 options = BuildOptions.None,
             });
             // our own full-window Korean loading page replaces Unity's fixed 960x600 template
+            // each build stamps a new version into the file URLs so browsers fetch the new game files right away
             if (report.summary.result == BuildResult.Succeeded && File.Exists("WebPage/index.html"))
-                File.Copy("WebPage/index.html", WebDir + "/index.html", true);
+                File.WriteAllText(WebDir + "/index.html",
+                    File.ReadAllText("WebPage/index.html").Replace("__BUILD_VERSION__", System.DateTime.UtcNow.ToString("yyyyMMddHHmmss")),
+                    new System.Text.UTF8Encoding(false));
             Finish(report, "WebGL");
         }
     }

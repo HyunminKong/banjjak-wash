@@ -46,11 +46,16 @@
       showNote("휴대폰에서는 조작이 안 돼요. PC 브라우저에서 열어 주세요.", false);
     }
     var buildUrl = "Build";
+    // The file names never change between builds, so every build gets its own version tag (filled in by BuildTools).
+    // Without it, browsers keep using the previous game files for a while even after Ctrl+F5.
+    var v = "?v=__BUILD_VERSION__";
     var config = {
       arguments: [],
-      dataUrl: buildUrl + "/WebGL.data.unityweb",
-      frameworkUrl: buildUrl + "/WebGL.framework.js.unityweb",
-      codeUrl: buildUrl + "/WebGL.wasm.unityweb",
+      dataUrl: buildUrl + "/WebGL.data.unityweb" + v,
+      frameworkUrl: buildUrl + "/WebGL.framework.js.unityweb" + v,
+      codeUrl: buildUrl + "/WebGL.wasm.unityweb" + v,
+      // plain browser caching only: Unity's own IndexedDB copy would otherwise pile up one 10 MB copy per version
+      cacheControl: function () { return "no-store"; },
       streamingAssetsUrl: "StreamingAssets",
       companyName: "Banjjak",
       productName: "Banjjak Wash",
@@ -59,7 +64,7 @@
       showBanner: function (msg, type) { if (type === "error") showNote(msg, true); },
     };
     var script = document.createElement("script");
-    script.src = buildUrl + "/WebGL.loader.js";
+    script.src = buildUrl + "/WebGL.loader.js" + v;
     script.onload = function () {
       createUnityInstance(canvas, config, function (progress) {
         var p = Math.round(progress * 100);
