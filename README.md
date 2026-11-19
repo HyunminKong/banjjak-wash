@@ -42,7 +42,11 @@ PC의 크롬이나 엣지에서 키보드와 마우스로 플레이해요. 처�
 - 에디터 메뉴 `반짝 워시` → `Windows 빌드` 또는 `웹(WebGL) 빌드`
 - 처음 열 때는 `반짝 워시` → `프로젝트 설정 다시 적용`, `텍스처 다시 굽기`를 한 번 실행해 주세요.
 - 모든 모델과 텍스처는 코드로 만들어요 (`Assets/Scripts/Build`).
-- 계정 저장은 Supabase를 써요. 내 프로젝트로 바꾸려면 SQL Editor에서 `Supabase/setup.sql`을 실행하고, Authentication → Email에서 Confirm email을 끄고, `Assets/Scripts/Game/Account.cs`의 `CloudConfig`에 Project URL과 publishable 키를 넣으세요. 둘 다 비워 두면 로그인 버튼 없이 브라우저 저장만 써요. secret 키는 절대 넣지 마세요.
+- 계정 저장은 Supabase를 써요. 내 프로젝트로 바꾸려면:
+  1. SQL Editor에서 `Supabase/setup.sql`을 실행해요.
+  2. Authentication → Sign In / Providers 맨 위 **User Signups**에서 **Confirm email**을 끄고 Save changes를 눌러요. 아이디를 가짜 이메일(`아이디@players.banjjak.game`)로 바꿔 가입시키기 때문에 확인 메일을 받을 수 없어요.
+  3. 같은 페이지 아래 공급자 목록의 **Email**은 켜 둬요. 꺼져 있으면 가입과 로그인이 모두 안 돼요.
+  4. `Assets/Scripts/Game/Account.cs`의 `CloudConfig`에 Project URL과 publishable 키를 넣어요. 둘 다 비워 두면 로그인 버튼 없이 브라우저 저장만 써요. secret 키는 절대 넣지 마세요.
 
 ## 크레딧
 
