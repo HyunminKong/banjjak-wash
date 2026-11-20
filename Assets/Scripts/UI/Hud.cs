@@ -146,17 +146,19 @@ namespace Banjjak
             BuildShop(sr);
             shopRoot.SetActive(false);
             p = cr;
-            const float cw = 560, ch = 164, gap = 12;
+            // more than 8 jobs: shorter cards (and a narrower description beside the button) so five rows fit
+            bool compact = JobDefs.All.Length > 8;
+            float cw = 560, ch = compact ? 132 : 164, gap = compact ? 10 : 12;
             for (int i = 0; i < JobDefs.All.Length; i++)
             {
                 int idx = i;
                 var d = JobDefs.All[i];
                 int col = i % 2, row = i / 2;
-                var cardRt = Box("card" + i, p, A(.5f, 1), A(.5f, 1), A((col == 0 ? -1 : 1) * (cw + gap) / 2, -150 - row * (ch + gap)), A(cw, ch));
+                var cardRt = Box("card" + i, p, A(.5f, 1), A(.5f, 1), A((col == 0 ? -1 : 1) * (cw + gap) / 2, -146 - row * (ch + gap)), A(cw, ch));
                 Panel(cardRt, new Color(1, 1, 1, .96f));
-                var title = Label(cardRt, $"{d.Name}  <size=13><color=#2f80ed>{d.Size}</color></size>", 20, Ink, TextAnchor.UpperLeft, A(0, 1), A(0, 1), A(20, -14), A(380, 28), true);
-                Label(cardRt, G.Money(d.Reward), 18, Ink, TextAnchor.UpperRight, A(1, 1), A(1, 1), A(-20, -15), A(140, 26), true);
-                var desc = Label(cardRt, d.Desc, 13, Sub, TextAnchor.UpperLeft, A(0, 1), A(0, 1), A(20, -46), A(cw - 40, 40));
+                var title = Label(cardRt, $"{d.Name}  <size=13><color=#2f80ed>{d.Size}</color></size>", 20, Ink, TextAnchor.UpperLeft, A(0, 1), A(0, 1), A(20, -12), A(380, 28), true);
+                Label(cardRt, G.Money(d.Reward), 18, Ink, TextAnchor.UpperRight, A(1, 1), A(1, 1), A(-20, -13), A(140, 26), true);
+                var desc = Label(cardRt, d.Desc, 13, Sub, TextAnchor.UpperLeft, A(0, 1), A(0, 1), A(20, -42), A(compact ? cw - 220 : cw - 40, 44));
                 desc.horizontalOverflow = HorizontalWrapMode.Wrap;
                 var sb = new StringBuilder();
                 foreach (var k in d.DirtKeys)
@@ -342,7 +344,7 @@ namespace Banjjak
             void Row(string name, int count, System.Func<int, string> label, System.Func<int, Color?> swatch, System.Action<int> pick, System.Func<int, bool> on, int perRow)
             {
                 Label(card, name, 15, Ink, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(360, y), A(110, 38), true);
-                float w = 92, gap = 8;
+                float w = perRow >= 4 ? 84 : 92, gap = 8;
                 for (int i = 0; i < count; i++)
                 {
                     int idx = i, r = i / perRow, c = i % perRow;

@@ -8,6 +8,10 @@ namespace Banjjak
     {
         public string Type;
         public bool Fast;   // the free auto mower: quicker, wider cut
+        /// <summary>Co-op: a friend's robot, only shown here (it cleans on their machine and the result arrives as updates).</summary>
+        public bool Ghost;
+        Vector3 ghostPos; float ghostYaw;
+        public void SetGhostTarget(Vector3 p, float yaw) { ghostPos = p; ghostYaw = yaw; }
         float x, y, z, h, th, t, pause, trip, chase;
         int load, target = -1;
         readonly HashSet<int> ign = new HashSet<int>();
@@ -29,6 +33,7 @@ namespace Banjjak
             Type = type; x = p.x; y = p.y; z = p.z; h = th = heading; t = Random.value * .4f;
             if (type == "drone") BuildDrone(); else BuildBot();
             transform.position = p;
+            ghostPos = p; ghostYaw = heading * Mathf.Rad2Deg;
         }
 
         // ------------------------------------------------------------------ models
@@ -123,6 +128,15 @@ namespace Banjjak
             if (Job == null) return;
             float dt = Mathf.Min(Time.deltaTime, .05f);
             led.SetColor("_Emission", (Type == "drone" ? G.Hex(0x2ab6ff) : G.Hex(0x2bdc6f)) * (1.4f + .8f * Mathf.Sin(Time.time * 6 + x)));
+            if (Ghost)
+            {
+                // glide to where the friend's robot was last reported
+                transform.position = Vector3.Lerp(transform.position, ghostPos, dt * 6);
+                transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.Euler(0, ghostYaw, 0), dt * 8);
+                foreach (var b in brushes) b.Rotate(0, dt * 1000, 0, Space.Self);
+                foreach (var r in rotors) r.Rotate(0, dt * 2400, 0, Space.Self);
+                return;
+            }
             if (Type == "drone") { UpdateDrone(dt); return; }
             foreach (var b in brushes) b.Rotate(0, dt * (pause > 0 ? 1700 : 1000), 0, Space.Self);
             if (pause > 0) { pause -= dt; transform.position = V(x, y + Mathf.Abs(Mathf.Sin(pause * 9)) * .02f, z); return; }

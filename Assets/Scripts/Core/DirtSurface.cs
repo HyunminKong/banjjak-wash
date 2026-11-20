@@ -282,6 +282,7 @@ namespace Banjjak
             int y0 = Mathf.Max(0, Mathf.FloorToInt(cy - R)), y1 = Mathf.Min(Ny - 1, Mathf.CeilToInt(cy + R));
             int z0 = Mathf.Max(0, Mathf.FloorToInt(cz - R)), z1 = Mathf.Min(Nz - 1, Mathf.CeilToInt(cz + R));
             int cleaned = 0;
+            bool hadFoam = false;
             var agents = Agents.All;
             for (int z = z0; z <= z1; z++)
             {
@@ -296,6 +297,7 @@ namespace Banjjak
                         float e = ((x - cx) * (x - cx) + dyz) / r2; if (e > 1) continue;
                         if (Foam != null && Foam[k] > 0)
                         {
+                            hadFoam = true;
                             float nf = Foam[k] * Mathf.Exp(-10f * (1 - e * .5f) * dt);
                             Foam[k] = nf < .04f ? 0 : nf;
                             Data[k * 4 + 2] = (byte)(Foam[k] * 255);
@@ -322,7 +324,34 @@ namespace Banjjak
             }
             TexDirty = true;
             Job.MarkWet(this);
+            if (hadFoam && NetHooks.Recording) NetHooks.Rinses.Add(new NetHooks.FoamStamp { Surf = Index, P = pw, R = radius });
             if (cleaned > 0 && !Done) Job.OnCleaned(this, cleaned);
+        }
+
+        /// <summary>Co-op: someone else's water washed the foam off here.</summary>
+        public void RinseRemote(Vector3 pw, float radius)
+        {
+            if (Foam == null) return;
+            var lp = transform.InverseTransformPoint(pw);
+            float R = Mathf.Max(.75f, radius * 1.5f / CellSize), r2 = R * R;
+            float cx = (lp.x - G0.x) / CellSize - .5f, cy = (lp.y - G0.y) / CellSize - .5f, cz = (lp.z - G0.z) / CellSize - .5f;
+            int x0 = Mathf.Max(0, Mathf.FloorToInt(cx - R)), x1 = Mathf.Min(Nx - 1, Mathf.CeilToInt(cx + R));
+            int y0 = Mathf.Max(0, Mathf.FloorToInt(cy - R)), y1 = Mathf.Min(Ny - 1, Mathf.CeilToInt(cy + R));
+            int z0 = Mathf.Max(0, Mathf.FloorToInt(cz - R)), z1 = Mathf.Min(Nz - 1, Mathf.CeilToInt(cz + R));
+            for (int z = z0; z <= z1; z++)
+                for (int y = y0; y <= y1; y++)
+                {
+                    int k = x0 + Nx * (y + Ny * z);
+                    for (int x = x0; x <= x1; x++, k++)
+                    {
+                        if (Surf[k] == 0) continue;
+                        if (((x - cx) * (x - cx) + (y - cy) * (y - cy) + (z - cz) * (z - cz)) > r2) continue;
+                        if (Foam[k] > 0) { Foam[k] = 0; Data[k * 4 + 2] = 0; }
+                        Data[k * 4 + 1] = 255;
+                    }
+                }
+            TexDirty = true;
+            Job.MarkWet(this);
         }
 
         public void StampFoam(Vector3 pw, float radius, float amount, int ai)

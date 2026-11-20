@@ -33,6 +33,10 @@ namespace Banjjak.Net
         string hostKey, fixedCode;
         Realtime rt;
         readonly Dictionary<string, Avatar> avatars = new Dictionary<string, Avatar>();
+        // friends' robots and scissor lifts, shown only (they act on their owner's machine)
+        readonly Dictionary<string, List<Robot>> ghostBots = new Dictionary<string, List<Robot>>();
+        readonly Dictionary<string, Lift> ghostLifts = new Dictionary<string, Lift>();
+        string lastBots = "", lastLift = "";
         float tickT, keepT, doneT, joinT, snapT;
         bool synced, waitingSnap;
         Vector3 lastFeet; float lastYaw, lastPitch; int lastTool = -1; bool lastSpray;
@@ -114,6 +118,7 @@ namespace Banjjak.Net
             rt = null;
             foreach (var a in avatars.Values) if (a != null) Destroy(a.gameObject);
             avatars.Clear();
+            ClearGhosts(null);
             Mode = Role.None;
             NetHooks.Track = false;
             NetHooks.Clear();
@@ -134,6 +139,89 @@ namespace Banjjak.Net
             if (!Active) return;
             BeginTracking();
             foreach (var a in avatars.Values) if (a != null) a.gameObject.SetActive(false);
+            ClearGhosts(null);
+            lastBots = lastLift = "";
+        }
+
+        /// <summary>Remove one friend's (or, with null, everyone's) robots and lift.</summary>
+        void ClearGhosts(string key)
+        {
+            foreach (var k in new List<string>(ghostBots.Keys))
+                if (key == null || k == key) { foreach (var r in ghostBots[k]) if (r != null) Destroy(r.gameObject); ghostBots.Remove(k); }
+            foreach (var k in new List<string>(ghostLifts.Keys))
+                if (key == null || k == key) { if (ghostLifts[k] != null) Destroy(ghostLifts[k].gameObject); ghostLifts.Remove(k); }
+        }
+
+        /// <summary>"type:x:y:z:yaw;..." for my robots, as they are right now.</summary>
+        static string BotsState()
+        {
+            var sb = new StringBuilder();
+            var seen = new HashSet<Robot>();
+            void Add(Robot r)
+            {
+                if (r == null || !seen.Add(r)) return;
+                var p = r.transform.position;
+                sb.Append(r.Type).Append(':').Append(MiniJson.Num(p.x)).Append(':').Append(MiniJson.Num(p.y)).Append(':').Append(MiniJson.Num(p.z))
+                  .Append(':').Append(MiniJson.Num(r.transform.eulerAngles.y)).Append(';');
+            }
+            foreach (var r in Robots.Active) Add(r);
+            Add(Robots.AutoMower);
+            return sb.ToString();
+        }
+
+        static string LiftState()
+        {
+            var l = Lift.Active;
+            if (l == null) return "";
+            var p = l.transform.position;
+            return MiniJson.Num(p.x) + "," + MiniJson.Num(p.y) + "," + MiniJson.Num(p.z) + "," + MiniJson.Num(l.transform.eulerAngles.y) + "," + MiniJson.Num(l.H);
+        }
+
+        void SyncGhostBots(string key, string state)
+        {
+            if (!ghostBots.TryGetValue(key, out var list)) ghostBots[key] = list = new List<Robot>();
+            var items = string.IsNullOrEmpty(state) ? new string[0] : state.TrimEnd(';').Split(';');
+            // rebuild when the set of robots changed, otherwise just move them
+            bool same = items.Length == list.Count;
+            for (int i = 0; same && i < items.Length; i++) if (list[i] == null || list[i].Type != items[i].Split(':')[0]) same = false;
+            if (!same)
+            {
+                foreach (var r in list) if (r != null) Destroy(r.gameObject);
+                list.Clear();
+            }
+            for (int i = 0; i < items.Length; i++)
+            {
+                var f = items[i].Split(':');
+                if (f.Length < 5) continue;
+                float.TryParse(f[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float x);
+                float.TryParse(f[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float y);
+                float.TryParse(f[3], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float z);
+                float.TryParse(f[4], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float yaw);
+                var p = new Vector3(x, y, z);
+                if (!same)
+                {
+                    var go = new GameObject("FriendBot_" + f[0]);
+                    var r = go.AddComponent<Robot>();
+                    r.Ghost = true;
+                    r.Init(f[0], p, yaw * Mathf.Deg2Rad);
+                    go.transform.rotation = Quaternion.Euler(0, yaw, 0);
+                    list.Add(r);
+                }
+                list[i].SetGhostTarget(p, yaw);
+            }
+        }
+
+        void SyncGhostLift(string key, string state)
+        {
+            ghostLifts.TryGetValue(key, out var l);
+            if (string.IsNullOrEmpty(state)) { if (l != null) Destroy(l.gameObject); ghostLifts.Remove(key); return; }
+            var f = state.Split(',');
+            if (f.Length < 5) return;
+            var v = new float[5];
+            for (int i = 0; i < 5; i++) float.TryParse(f[i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v[i]);
+            if (l == null) ghostLifts[key] = l = Lift.Ghost();
+            l.transform.SetPositionAndRotation(new Vector3(v[0], v[1], v[2]), Quaternion.Euler(0, v[3], 0));
+            l.SetHeight(v[4]);
         }
 
         void BeginTracking()
@@ -206,6 +294,7 @@ namespace Banjjak.Net
             if (meta == null)
             {
                 if (avatars.TryGetValue(key, out var gone)) { if (gone != null) { gm.Toast($"{gone.DisplayName} 님이 나갔어요", "", ToastKind.Info); Destroy(gone.gameObject); } avatars.Remove(key); }
+                ClearGhosts(key);
                 if (key == hostKey && IsGuest) Leave("방장이 나가서 방이 닫혔어요");
                 gm.Hud?.RefreshCoop();
                 return;
@@ -260,7 +349,9 @@ namespace Banjjak.Net
                     av.Turbo = MiniJson.I(p, "tb") == 1; av.FanV = MiniJson.I(p, "fv") == 1; av.Agent = MiniJson.I(p, "ag");
                 }
             }
-            if (!sameJob) return;
+            if (!sameJob) { ClearGhosts(k); return; }
+            SyncGhostBots(k, MiniJson.Str(p, "rb"));
+            SyncGhostLift(k, MiniJson.Str(p, "lf"));
             ApplyChanges(p);
         }
 
@@ -295,6 +386,18 @@ namespace Banjjak.Net
                         if (si >= job.Surfs.Count) continue;
                         var pt = new Vector3(BitConverter.ToSingle(b, i + 2), BitConverter.ToSingle(b, i + 6), BitConverter.ToSingle(b, i + 10));
                         job.Surfs[si].StampFoam(pt, BitConverter.ToSingle(b, i + 14), BitConverter.ToSingle(b, i + 18), b[i + 22]);
+                    }
+                }
+                var rs = MiniJson.Str(p, "rs");
+                if (!string.IsNullOrEmpty(rs))
+                {
+                    var b = Convert.FromBase64String(rs);
+                    for (int i = 0; i + 18 <= b.Length; i += 18)
+                    {
+                        int si = b[i] | b[i + 1] << 8;
+                        if (si >= job.Surfs.Count) continue;
+                        var pt = new Vector3(BitConverter.ToSingle(b, i + 2), BitConverter.ToSingle(b, i + 6), BitConverter.ToSingle(b, i + 10));
+                        job.Surfs[si].RinseRemote(pt, BitConverter.ToSingle(b, i + 14));
                     }
                 }
                 var g = MiniJson.Str(p, "g");
@@ -349,11 +452,15 @@ namespace Banjjak.Net
             bool spray = w != null && w.Spraying;
             bool moved = (feet - lastFeet).sqrMagnitude > .0004f || Mathf.Abs(Mathf.DeltaAngle(pl.Yaw, lastYaw)) > 1 || Mathf.Abs(pl.Pitch - lastPitch) > 1
                          || spray != lastSpray || (w != null && w.Tool != lastTool);
-            bool pending = NetHooks.Cuts.Count + NetHooks.Pulls.Count + NetHooks.Picks.Count + NetHooks.Foams.Count > 0 || AnyTouched();
-            if (!moved && !pending && !spray && keepT < 2 && doneT < 3) return;
+            bool pending = NetHooks.Cuts.Count + NetHooks.Pulls.Count + NetHooks.Picks.Count + NetHooks.Foams.Count + NetHooks.Rinses.Count > 0 || AnyTouched();
+            // my robots keep moving, and a lift going up or away has to show on the others' screens too
+            string bots = BotsState(), lift = LiftState();
+            bool gear = bots.Length > 0 || bots != lastBots || lift != lastLift;
+            if (!moved && !pending && !spray && !gear && keepT < 2 && doneT < 3) return;
             tickT = 0; keepT = 0;
             lastFeet = feet; lastYaw = pl.Yaw; lastPitch = pl.Pitch; lastSpray = spray; lastTool = w != null ? w.Tool : 0;
-            rt.Broadcast("t", BuildTick(pl, w, spray));
+            lastBots = bots; lastLift = lift;
+            rt.Broadcast("t", BuildTick(pl, w, spray, bots, lift));
         }
 
         bool AnyTouched()
@@ -362,7 +469,7 @@ namespace Banjjak.Net
             return false;
         }
 
-        string BuildTick(PlayerController pl, WasherTool w, bool spray)
+        string BuildTick(PlayerController pl, WasherTool w, bool spray, string bots, string lift)
         {
             var sb = new StringBuilder(256);
             var f = pl.transform.position;
@@ -413,6 +520,27 @@ namespace Banjjak.Net
                 }
                 sb.Append(",\"f\":\"").Append(Convert.ToBase64String(fb.ToArray())).Append('"');
             }
+            if (NetHooks.Rinses.Count > 0)
+            {
+                // water over foam: (surface u16, point 3 x f32, radius f32), nearby ones merged
+                var kept = new List<NetHooks.FoamStamp>();
+                foreach (var fs in NetHooks.Rinses)
+                {
+                    int m = kept.FindLastIndex(x => x.Surf == fs.Surf && (x.P - fs.P).sqrMagnitude < .015f);
+                    if (m >= 0) { var x = kept[m]; x.R = Mathf.Max(x.R, fs.R); kept[m] = x; }
+                    else if (kept.Count < 160) kept.Add(fs);
+                }
+                var rb = new List<byte>(kept.Count * 18);
+                foreach (var fs in kept)
+                {
+                    rb.Add((byte)fs.Surf); rb.Add((byte)(fs.Surf >> 8));
+                    rb.AddRange(BitConverter.GetBytes(fs.P.x)); rb.AddRange(BitConverter.GetBytes(fs.P.y)); rb.AddRange(BitConverter.GetBytes(fs.P.z));
+                    rb.AddRange(BitConverter.GetBytes(fs.R));
+                }
+                sb.Append(",\"rs\":\"").Append(Convert.ToBase64String(rb.ToArray())).Append('"');
+            }
+            if (bots.Length > 0) sb.Append(",\"rb\":").Append(MiniJson.Quote(bots));
+            if (lift.Length > 0) sb.Append(",\"lf\":").Append(MiniJson.Quote(lift));
             if (NetHooks.Cuts.Count > 0)
             {
                 var gb = new byte[NetHooks.Cuts.Count * 3];
@@ -449,6 +577,16 @@ namespace Banjjak.Net
         }
 
         public int AvatarCount => avatars.Count;
+        public int GhostBotCount { get { int n = 0; foreach (var l in ghostBots.Values) n += l.Count; return n; } }
+        public int GhostLiftCount => ghostLifts.Count;
+
+        /// <summary>Test: how much foam lies on the job right now.</summary>
+        public static float FoamSum(CleanJob job)
+        {
+            float s = 0;
+            foreach (var d in job.Surfs) if (d.Foam != null) foreach (var f in d.Foam) s += f;
+            return s;
+        }
         public Avatar AnyAvatar() { foreach (var a in avatars.Values) if (a != null) return a; return null; }
     }
 }

@@ -162,8 +162,26 @@ namespace Banjjak
                 int picked = 0;
                 if (Job.Trash != null) for (int i = 0; i < Job.Trash.N && picked < 3; i++) if (Job.Trash.Pick(i)) picked++;
                 testLog.AppendLine($"host sprayed 4 s: progress {p0 * 100:0.0}% -> {Job.Progress * 100:0.0}%, picked {picked} trash");
+                // foam a patch, then rinse it off with water (the guest has to see both)
+                Washer.SelectTool(1); Washer.ForceSpray = true;
+                yield return new WaitForSeconds(2.5f);
+                Washer.ForceSpray = false;
+                yield return new WaitForSeconds(1.5f);
+                Washer.SelectTool(0); Washer.ForceSpray = true;
+                yield return new WaitForSeconds(3f);
+                Washer.ForceSpray = false;
+                testLog.AppendLine($"host foamed and rinsed: foam left here {Net.Coop.FoamSum(Job):0.0}");
+                // put up the lift, ride it 1.5 m up and send out the auto mower
+                Lift.Toggle(Player, Job);
+                if (Lift.Active != null)
+                {
+                    Lift.Active.SetHeight(1.5f);
+                    Player.SetPose(Lift.Active.transform.position + Vector3.up * (Lift.Active.Top + .05f), Player.Yaw, 20);
+                }
+                Robots.ToggleAutoMower(Player);
+                testLog.AppendLine($"host lift: {Lift.Active != null}, auto mower out: {Robots.AutoMower != null}");
                 // watch the guest spray
-                for (t = 0; t < 20; t += Time.unscaledDeltaTime)
+                for (t = 0; t < 45; t += Time.unscaledDeltaTime)
                 {
                     var g = coop.AnyAvatar();
                     if (g != null && g.gameObject.activeSelf && g.Spraying)
@@ -198,6 +216,20 @@ namespace Banjjak
                 yield return ShotWait("coop_guest_view.png");
                 yield return new WaitForSeconds(3);
                 testLog.AppendLine($"while the host sprayed: progress {p0 * 100:0.0}% -> {Job.Progress * 100:0.0}%, trash picked here {Job.Trash?.Count}");
+                // the host's foam shows up here, and their rinse washes it off here too
+                float foamMax = 0;
+                for (t = 0; t < 15 && foamMax < 2; t += Time.unscaledDeltaTime) { foamMax = Mathf.Max(foamMax, Net.Coop.FoamSum(Job)); yield return null; }
+                for (t = 0; t < 4; t += Time.unscaledDeltaTime) { foamMax = Mathf.Max(foamMax, Net.Coop.FoamSum(Job)); yield return null; }
+                for (t = 0; t < 15 && Net.Coop.FoamSum(Job) > foamMax * .2f; t += Time.unscaledDeltaTime) yield return null;
+                testLog.AppendLine($"host's foam here: peak {foamMax:0.0}, after their rinse {Net.Coop.FoamSum(Job):0.0}");
+                // the host's lift and auto mower show up here
+                for (t = 0; t < 15 && (coop.GhostLiftCount == 0 || coop.GhostBotCount == 0); t += Time.unscaledDeltaTime) yield return null;
+                yield return new WaitForSeconds(1.5f);
+                var hh = coop.AnyAvatar();
+                if (hh != null) { var dd = hh.transform.position - Player.transform.position; Player.SetPose(Player.transform.position, Mathf.Atan2(dd.x, dd.z) * Mathf.Rad2Deg, -6); }
+                yield return new WaitForSeconds(.5f);
+                yield return ShotWait("coop_guest_gear.png");
+                testLog.AppendLine($"host's gear here: lifts {coop.GhostLiftCount}, robots {coop.GhostBotCount}, host avatar height {(hh != null ? hh.transform.position.y : -1):0.00} m");
                 // now the guest cleans a different patch
                 Player.SetPose(Job.Spawn + new Vector3(2.5f, 0, -1.5f), 160, 40);
                 Washer.ForceSpray = true;
@@ -813,6 +845,17 @@ namespace Banjjak
                 float bt = StartJob(i);
                 yield return new WaitForSeconds(.8f);
                 yield return ShotWait($"job{i}_{Job.Id}.png");
+                if (i >= 8)
+                {
+                    // the big co-op maps: one more shot across the whole site from a corner
+                    var b = Job.Bounds;
+                    var corner = new Vector3(b.xMin + 2.5f, 0, b.yMax - 2.5f);
+                    var dir = new Vector3(b.center.x, 0, b.center.y) - corner;
+                    Player.SetPose(corner, Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg, 8);
+                    yield return new WaitForSeconds(.4f);
+                    yield return ShotWait($"job{i}_{Job.Id}_wide.png");
+                    Player.SetPose(Job.Spawn, Job.SpawnYaw, 12);
+                }
                 var zero = new List<string>();
                 foreach (var o in Job.Objects) foreach (var c in o.Comps) if (c.Total == 0) zero.Add(o.Name + "/" + c.Name);
                 testLog.AppendLine($"{Job.Id}: build {bt:0.00}s, objects {Job.Objects.Count}, surfaces {Job.Surfs.Count}, cells {Job.Total}, zero-total comps: {(zero.Count == 0 ? "none" : string.Join(", ", zero))}");

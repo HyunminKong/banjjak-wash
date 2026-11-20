@@ -21,7 +21,12 @@ namespace Banjjak
         const float Step = .25f;          // grid spacing for standing spots (fine enough for 40 cm stair treads)
         const float Climb = .7f;          // a step or a jump (jump apex is about .75 m)
         const float Range = 7.4f;         // base spray range, a little under G.BaseRange
-        const float HitTol = .08f;        // the jet cleans cells this close to where it lands
+        const float HitTol = .09f;        // the jet cleans cells this close to where it lands
+        // A real jet is a few cm thick and hard to aim through hairline gaps or at a face it only grazes, so the test
+        // ray is a 5 cm ball and must meet the face within about 70 degrees of its normal (the ball's contact point
+        // drifts past the tolerance at steeper angles). Gaps like a 3 cm slot between a wheel and its arch count as
+        // unreachable and get left out, instead of sitting at 95% forever.
+        const float JetR = .025f, MinFacing = .2f;
         const int MaxRays = 800;          // per cell point, before giving up
 
         static readonly int Solid = (1 << Layers.Default) | (1 << Layers.PlayerOnly);
@@ -70,10 +75,10 @@ namespace Banjjak
                                 var v = p - e;
                                 float d = v.magnitude;
                                 if (d > Range || d < .05f) continue;
-                                if (Vector3.Dot(-v, n) < .1f * d) continue;      // eye behind or edge-on to the face
+                                if (Vector3.Dot(-v, n) < MinFacing * d) continue;      // eye behind or edge-on to the face
                                 rays++;
                                 if (++tries > MaxRays) return false;
-                                if (!Physics.Raycast(e, v / d, out var hit, d + .15f, Layers.SprayMask, QueryTriggerInteraction.Ignore)) continue;
+                                if (!Physics.SphereCast(e, JetR, v / d, out var hit, d + .15f, Layers.SprayMask, QueryTriggerInteraction.Ignore)) continue;
                                 if (hit.collider.gameObject != s.gameObject) continue;
                                 if ((hit.point - p).sqrMagnitude > HitTol * HitTol) continue;
                                 return true;

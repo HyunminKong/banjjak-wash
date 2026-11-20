@@ -15,9 +15,11 @@ namespace Banjjak
         public static readonly List<int> Cuts = new List<int>(), Pulls = new List<int>(), Picks = new List<int>();
         public struct FoamStamp { public int Surf; public Vector3 P; public float R, Amount; public int Agent; }
         public static readonly List<FoamStamp> Foams = new List<FoamStamp>();
+        /// <summary>Water sprayed where there was foam: others rinse the foam off at the same spots.</summary>
+        public static readonly List<FoamStamp> Rinses = new List<FoamStamp>();
 
         public static bool Recording => Track && !Remote;
 
-        public static void Clear() { Cuts.Clear(); Pulls.Clear(); Picks.Clear(); Foams.Clear(); }
+        public static void Clear() { Cuts.Clear(); Pulls.Clear(); Picks.Clear(); Foams.Clear(); Rinses.Clear(); }
     }
 }

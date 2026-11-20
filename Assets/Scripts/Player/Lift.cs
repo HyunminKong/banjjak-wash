@@ -57,10 +57,21 @@ namespace Banjjak
             if (Active != null) { Destroy(Active.gameObject); Active = null; }
         }
 
+        /// <summary>Co-op: a friend's lift, shown at the place and height they report (no colliders, no controls).</summary>
+        public static Lift Ghost()
+        {
+            var go = new GameObject("FriendLift");
+            var l = go.AddComponent<Lift>();
+            l.ghost = true;
+            l.Build(null);
+            return l;
+        }
+        bool ghost;
+
         void Build(PlayerController p)
         {
             player = p;
-            cc = p.GetComponent<CharacterController>();
+            cc = p != null ? p.GetComponent<CharacterController>() : null;
             var yellow = Mats.Yellow;
             Part(MeshKit.RoundedBox(1.6f, .22f, 1.1f, .04f), Mats.DarkMetal, V(0, .17f, 0));
             foreach (var w in new[] { V(-.62f, .08f, -.5f), V(.62f, .08f, -.5f), V(-.62f, .08f, .5f), V(.62f, .08f, .5f) })
@@ -78,6 +89,7 @@ namespace Banjjak
             rail.Add(MeshKit.LineTube(V(-.76f, .5f, -.51f), V(.76f, .5f, -.51f), .018f));
             var rg = Part(rail, yellow, Vector3.zero);
             rg.transform.SetParent(plat, false);
+            if (ghost) { UpdateVisual(); return; }
 
             var colGo = new GameObject("platformCollider");
             colGo.transform.SetParent(plat, false);

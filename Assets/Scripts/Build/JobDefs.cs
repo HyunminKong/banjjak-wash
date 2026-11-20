@@ -42,6 +42,12 @@ namespace Banjjak
             new JobDef { Id = "tower", Name = "3층 상가 건물", Size = "초대형", Reward = 15000, Spawn = new Vector2(0, 12), Bounds = Rect.MinMaxRect(-22, -19, 22, 16), FreeLift = true,
                 Desc = "1층 카페, 2층 사무실, 3층 창고까지 건물 안팎을 통째로. 계단으로 층을 오가며 닦고, 높은 외벽은 현장 작업대(L)로 닦으세요.", Build = Jobs2.BuildTower,
                 DirtKeys = new[] { "grime", "mildew", "dust", "gum", "paint" } },
+            new JobDef { Id = "harbor", Name = "항구 창고 부두", Size = "초대형", Reward = 18000, Spawn = new Vector2(0, 11.5f), Bounds = Rect.MinMaxRect(-24, -19, 24, 17),
+                Desc = "기름과 새똥으로 얼룩진 넓은 부두 바닥, 안벽과 계류 기둥, 수로에 묶인 어선, 컨테이너와 창고 셔터까지. 친구와 같이 하면 금방이에요.", Build = Jobs3.BuildHarbor,
+                DirtKeys = new[] { "oil", "bird", "algae", "rust", "lime" } },
+            new JobDef { Id = "school", Name = "학교 운동장", Size = "초대형", Reward = 21000, Spawn = new Vector2(0, 18.5f), Bounds = Rect.MinMaxRect(-26, -21, 26, 20),
+                Desc = "진흙과 껌 자국 가득한 운동장, 2층 학교 외벽과 창문, 농구·축구 골대, 스탠드, 철봉과 수돗가까지. 가장 넓은 현장이에요.", Build = Jobs3.BuildSchool,
+                DirtKeys = new[] { "mud", "gum", "grime", "mildew", "rust" } },
         };
 
         public static int IndexOf(string id) => Array.FindIndex(All, d => d.Id == id);
