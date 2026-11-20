@@ -272,12 +272,14 @@ namespace Banjjak
             Job.CompDone += (c, pay) => { AddMoney(pay); if (!c.Obj.Done) Toast($"{c.Obj.Name} · {c.Name}", "+" + G.Money(pay), ToastKind.Normal); Ding(false); };
             Job.ObjectDone += (o, pay) => { Toast($"{o.Name} 완료!", "+" + G.Money(pay), ToastKind.Big); Ding(true); };
             Job.JobDone += bonus => OnJobDone(bonus);
+            // parts that only finished on loading still pay, and a job with nothing left gets finished
+            if (loaded) Job.SettleAfterLoad();
             Player.SetPose(Job.Spawn, Job.SpawnYaw, 12);
             probe.RenderProbe();
             Save.Current = Job.Id;
             PersistSave();
             if (Hud != null) Hud.OnJobChanged();
-            if (loaded) Toast("이어서 하기", $"진행도 {Mathf.FloorToInt(Job.Progress * 100)}%", ToastKind.Info);
+            if (loaded && !Job.Completed) Toast("이어서 하기", $"진행도 {Mathf.FloorToInt(Job.Progress * 100)}%", ToastKind.Info);
             return Time.realtimeSinceStartup - t0;
         }
 
@@ -715,6 +717,26 @@ namespace Banjjak
             else testLog.AppendLine($"reach check: {(stuckJobs == 0 ? $"all {JobDefs.All.Length} jobs can reach 100%" : stuckJobs + " job(s) have surfaces that can't be finished")}");
             DirtSurface.KeepSamples = false;
             CleanJob.UseReachBake = true;
+
+            // a save where every part is clean but none was marked finished (what an update that leaves out
+            // unreachable cells produces) must finish the job on loading, so the next job unlocks
+            {
+                StartJob(0);
+                foreach (var s in Job.Surfs) { for (int k = 0; k < s.N; k++) if (s.Surf[k] == 2) s.DirtAmt[k] = 0; s.RecountFromDirt(); }
+                var raw = Job.Serialize();
+                var j2 = JobDefs.Create(0, 1f);
+                j2.Finish();
+                bool applied = j2.Apply(raw);
+                int paid = 0; bool fired = false;
+                j2.CompDone += (c, pay) => paid += pay;
+                j2.JobDone += b => fired = true;
+                j2.SettleAfterLoad();
+                testLog.AppendLine($"load settle: applied {applied}, completed {j2.Completed}, job-done event {fired}, parts paid ${paid}");
+                Destroy(j2.Root.gameObject);
+                // the tests below expect the tower, the last job of the loop above
+                StartJob(JobDefs.IndexOf("tower"));
+                yield return new WaitForSeconds(.8f);
+            }
 
             // tower: inside the 2nd floor, then the lift against the front wall
             Player.SetPose(new Vector3(-1, 3.52f, -5.2f), 200, 8);

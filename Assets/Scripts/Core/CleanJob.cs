@@ -360,13 +360,7 @@ namespace Banjjak
             Earned += pay;
             CompDone?.Invoke(c, pay);
             if (c.Obj.Done) ObjectDone?.Invoke(c.Obj, pay);
-            if (!Completed && Objects.TrueForAll(o => o.Done))
-            {
-                Completed = true;
-                int bonus = Mathf.RoundToInt(Reward * Mul * .6f);
-                Earned += bonus;
-                JobDone?.Invoke(bonus);
-            }
+            CompleteIfAllDone();
         }
 
         /// <summary>Per-frame bookkeeping: drying, foam soak, texture uploads.</summary>
@@ -499,6 +493,8 @@ namespace Banjjak
                         int len = r.ReadInt32();
                         all.Add((done, r.ReadBytes(len)));
                     }
+                    loadDone.Clear();
+                    newlyDone.Clear();
                     for (int i = 0; i < Surfs.Count; i++)
                     {
                         var s = Surfs[i];
@@ -516,7 +512,12 @@ namespace Banjjak
                         // neighbours of counted voxels follow them so edges stay consistent
                         s.Dilate();
                         s.RecountFromDirt();
-                        if (all[i].done || s.Remaining <= s.Allow) { s.Finish(); }
+                        if (all[i].done || s.Remaining <= s.Allow)
+                        {
+                            // finished only now (e.g. a game update left out cells nobody can reach): settle it after loading
+                            if (!all[i].done) newlyDone.Add(s);
+                            s.Finish();
+                        }
                     }
                     Elapsed = elapsed;
                     if (ver >= 8)
@@ -529,9 +530,40 @@ namespace Banjjak
                 }
                 ComputeTotals();
                 foreach (var o in Objects) foreach (var c in o.Comps) if (c.Done) c.Remaining = 0;
+                foreach (var s in newlyDone) if (s.Comp.Done && !loadDone.Contains(s.Comp)) loadDone.Add(s.Comp);
                 return true;
             }
             catch (Exception e) { Debug.LogWarning("[Banjjak] load failed: " + e.Message); return false; }
+        }
+
+        readonly List<Comp> loadDone = new List<Comp>();
+        readonly List<DirtSurface> newlyDone = new List<DirtSurface>();
+
+        /// <summary>
+        /// After a save is applied (and the events are hooked up): pay for parts that only finished on loading, and
+        /// finish the job if nothing is left. Without this a job could sit at 100% with nothing to clean and never
+        /// unlock the next one.
+        /// </summary>
+        public void SettleAfterLoad()
+        {
+            foreach (var c in loadDone)
+            {
+                int pay = Mathf.Max(3, Mathf.RoundToInt(c.Total * PayPerCell));
+                Earned += pay;
+                CompDone?.Invoke(c, pay);
+                if (c.Obj.Done) ObjectDone?.Invoke(c.Obj, pay);
+            }
+            loadDone.Clear();
+            CompleteIfAllDone();
+        }
+
+        void CompleteIfAllDone()
+        {
+            if (Completed || !Objects.TrueForAll(o => o.Done)) return;
+            Completed = true;
+            int bonus = Mathf.RoundToInt(Reward * Mul * .6f);
+            Earned += bonus;
+            JobDone?.Invoke(bonus);
         }
 
         static void WriteBits(BinaryWriter w, bool[] bits)
