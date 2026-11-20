@@ -19,6 +19,7 @@ namespace Banjjak
         public int Agent;
         public List<string> Done = new List<string>();
         public string Current = "patio";
+        public string Look = "bear-0-1";   // 꾸미기: animal-suit-hat
         public List<string> Owned = new List<string>();
         public int Robots, TrashBots, Drones, MowBots;
         public int Tool;
@@ -64,9 +65,11 @@ namespace Banjjak
         void Awake()
         {
             I = this;
+            gameObject.AddComponent<Net.Coop>();
             LoadSave();
             var args = Environment.GetCommandLineArgs();
             for (int i = 0; i < args.Length - 1; i++) if (args[i] == "-autotest") autotestDir = args[i + 1];
+            for (int i = 0; i < args.Length - 1; i++) { if (args[i] == "-cooptest") coopTest = args[i + 1]; if (args[i] == "-room") coopRoom = args[i + 1]; }
             // graphics options from Esc → 설정 (the automated test always uses the defaults)
             if (autotestDir != null) GfxSettings.Defaults(); else GfxSettings.Load();
             GfxSettings.Apply();
@@ -90,12 +93,123 @@ namespace Banjjak
             int start = Mathf.Max(0, JobDefs.IndexOf(Save.Current));
             StartJob(start);
             Hud.Build(this);
+            ApplyLookToHands();
             if (Save.Tool > 0 && Save.Tool < 3 && Owned(Shop.Tools[Save.Tool].Id)) Washer.SelectTool(Save.Tool);
             if (!Owned(Agents.All[Save.Agent].Id)) Save.Agent = 0;
             Washer.Refresh();
             SetMode(GameMode.Menu);
-            if (autotestDir != null) StartCoroutine(AutoTest());
-            else if (CloudConfig.Enabled && PlayerPrefs.HasKey("banjjak-refresh")) StartCoroutine(AutoLogin());
+            if (autotestDir != null) StartCoroutine(coopTest == "avatars" ? AvatarTest() : coopTest != null ? CoopTest() : AutoTest());
+            else
+            {
+                if (CloudConfig.Enabled && PlayerPrefs.HasKey("banjjak-refresh")) StartCoroutine(AutoLogin());
+                StartCoroutine(JoinFromLink());
+            }
+        }
+
+        /// <summary>꾸미기: save the look, show it on my first-person sleeves, and tell the co-op room.</summary>
+        public void SetLook(Skins.Look look)
+        {
+            Save.Look = look.ToString();
+            PersistSave();
+            ApplyLookToHands();
+            Net.Coop.I?.RefreshPresence();
+        }
+
+        public void ApplyLookToHands()
+        {
+            var l = Skins.Look.Parse(Save.Look);
+            if (Mats.Sleeve != null) Mats.Sleeve.SetColor("_BaseColor", Skins.Suits[l.Suit] * .85f);
+        }
+
+        /// <summary>Invite links: .../banjjak-wash/?room=1234 joins that room once the account (if any) has signed in.</summary>
+        IEnumerator JoinFromLink()
+        {
+            var q = Net.NetSocket.PageQuery();
+            var m = System.Text.RegularExpressions.Regex.Match(q ?? "", @"[?&]room=(\d{4})");
+            if (!m.Success || !CloudConfig.Enabled) yield break;
+            float t = 0;
+            while (PlayerPrefs.HasKey("banjjak-refresh") && !Acct.LoggedIn && t < 4) { t += Time.unscaledDeltaTime; yield return null; }
+            Net.Coop.I.Join(m.Groups[1].Value);
+            Hud?.ShowCoop(true);
+        }
+
+        // ------------------------------------------------------------------ co-op test (two desktop builds)
+        string coopTest, coopRoom = "9137";
+
+        IEnumerator CoopTest()
+        {
+            Player.InputEnabled = false;
+            var coop = Net.Coop.I;
+            bool host = coopTest == "host";
+            testLog.AppendLine($"co-op test as {coopTest}, room {coopRoom}");
+            float t;
+            if (host) { StartJob(0); coop.Host(coopRoom); }
+            else { yield return new WaitForSeconds(3); coop.Join(coopRoom); }
+            for (t = 0; !coop.Connected && t < 20; t += Time.unscaledDeltaTime) yield return null;
+            testLog.AppendLine($"joined: {coop.Connected} ({coop.Status})");
+            SetMode(GameMode.Playing);
+
+            if (host)
+            {
+                for (t = 0; coop.AvatarCount == 0 && t < 60; t += Time.unscaledDeltaTime) yield return null;
+                testLog.AppendLine($"guest arrived: {coop.AvatarCount > 0}, names: {string.Join(", ", coop.Names())}");
+                yield return new WaitForSeconds(8);   // the guest rebuilds the job and takes the snapshot
+                Player.SetPose(Job.Spawn + new Vector3(-1.5f, 0, -2.5f), 180, 38);
+                float p0 = Job.Progress;
+                Washer.ForceSpray = true;
+                yield return new WaitForSeconds(4);
+                Washer.ForceSpray = false;
+                int picked = 0;
+                if (Job.Trash != null) for (int i = 0; i < Job.Trash.N && picked < 3; i++) if (Job.Trash.Pick(i)) picked++;
+                testLog.AppendLine($"host sprayed 4 s: progress {p0 * 100:0.0}% -> {Job.Progress * 100:0.0}%, picked {picked} trash");
+                // watch the guest spray
+                for (t = 0; t < 20; t += Time.unscaledDeltaTime)
+                {
+                    var g = coop.AnyAvatar();
+                    if (g != null && g.gameObject.activeSelf && g.Spraying)
+                    {
+                        var d = g.transform.position - Player.transform.position;
+                        Player.SetPose(Player.transform.position, Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg, 8);
+                        yield return new WaitForSeconds(1.2f);
+                        yield return ShotWait("coop_host_view.png");
+                        yield return new WaitForSeconds(6);   // stay in the room until the guest has finished and logged
+                        break;
+                    }
+                    yield return null;
+                }
+            }
+            else
+            {
+                for (t = 0; (coop.AnyAvatar() == null || coop.Status.Contains("받는 중")) && t < 40; t += Time.unscaledDeltaTime) yield return null;
+                testLog.AppendLine($"synced to the host's job: {Job.Id}, progress {Job.Progress * 100:0.0}% ({coop.Status})");
+                // stand beside the host's spray spot and watch them work
+                var hostSpot = Job.Spawn + new Vector3(-1.5f, 0, -2.5f);
+                var me = hostSpot + new Vector3(2.6f, 0, -2.2f);
+                for (t = 0; t < 30; t += Time.unscaledDeltaTime)
+                {
+                    var h = coop.AnyAvatar();
+                    var d = (h != null ? h.transform.position : hostSpot) - me;
+                    Player.SetPose(me, Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg, 6);
+                    if (h != null && h.gameObject.activeSelf && h.Spraying) break;
+                    yield return null;
+                }
+                float p0 = Job.Progress;
+                yield return new WaitForSeconds(1.5f);
+                yield return ShotWait("coop_guest_view.png");
+                yield return new WaitForSeconds(3);
+                testLog.AppendLine($"while the host sprayed: progress {p0 * 100:0.0}% -> {Job.Progress * 100:0.0}%, trash picked here {Job.Trash?.Count}");
+                // now the guest cleans a different patch
+                Player.SetPose(Job.Spawn + new Vector3(2.5f, 0, -1.5f), 160, 40);
+                Washer.ForceSpray = true;
+                yield return new WaitForSeconds(4);
+                Washer.ForceSpray = false;
+            }
+            yield return new WaitForSeconds(9);   // let the last updates and the finished-surface lists cross
+            testLog.AppendLine($"final: progress {Job.Progress * 100:0.00}%, remaining {Job.Remaining}, trash picked {Job.Trash?.Count}, checksum {Net.Coop.Checksum(Job)}");
+            coop.Leave(null, false);
+            File.WriteAllText(Path.Combine(autotestDir, "autotest.log"), testLog.ToString());
+            yield return new WaitForSeconds(.3f);
+            Application.Quit();
         }
 
         // ------------------------------------------------------------------ shop
@@ -241,7 +355,8 @@ namespace Banjjak
         }
 
         /// <summary>Tear down the current job (saving it) and build another one.</summary>
-        public float StartJob(int index, bool fresh = false)
+        /// <param name="noLoad">co-op guest: build the job clean and keep the guest's own saved progress untouched</param>
+        public float StartJob(int index, bool fresh = false, bool noLoad = false)
         {
             if (Job != null)
             {
@@ -256,8 +371,8 @@ namespace Banjjak
             JobIndex = index;
             Job = JobDefs.Create(index, IsDone(index) ? .5f : 1f);
             Job.Finish();
-            if (fresh) ClearJobSave(Job.Id);
-            bool loaded = autotestDir == null && !fresh && Job.Apply(ReadJobSave(Job.Id));
+            if (fresh && !noLoad) ClearJobSave(Job.Id);
+            bool loaded = autotestDir == null && !fresh && !noLoad && Job.Apply(ReadJobSave(Job.Id));
             Job.CompDone += (c, pay) => { AddMoney(pay); if (!c.Obj.Done) Toast($"{c.Obj.Name} · {c.Name}", "+" + G.Money(pay), ToastKind.Normal); Ding(false); };
             Job.ObjectDone += (o, pay) => { Toast($"{o.Name} 완료!", "+" + G.Money(pay), ToastKind.Big); Ding(true); };
             Job.JobDone += bonus => OnJobDone(bonus);
@@ -268,6 +383,7 @@ namespace Banjjak
             Save.Current = Job.Id;
             PersistSave();
             if (Hud != null) Hud.OnJobChanged();
+            Net.Coop.I?.OnJobStarted();
             if (loaded && !Job.Completed) Toast("이어서 하기", $"진행도 {Mathf.FloorToInt(Job.Progress * 100)}%", ToastKind.Info);
             return Time.realtimeSinceStartup - t0;
         }
@@ -285,6 +401,14 @@ namespace Banjjak
         /// <summary>Menu card clicked.</summary>
         public void PickJob(int index)
         {
+            var coop = Net.Coop.I;
+            if (coop != null && coop.IsGuest)
+            {
+                // guests play the host's job, even one they haven't unlocked yet
+                if (Job != null && index == JobIndex) { SetMode(GameMode.Playing); return; }
+                Toast("같이 하기 중에는 방장이 현장을 골라요", "주황색 '같이 닦기' 카드를 누르세요", ToastKind.Info);
+                return;
+            }
             if (!Unlocked(index)) return;
             bool same = index == JobIndex && Job != null && !Job.Completed;
             if (!same) StartJob(index, IsDone(index) && SavedProgress(JobDefs.All[index].Id) <= 0);
@@ -553,6 +677,8 @@ namespace Banjjak
 
         void SaveJob()
         {
+            // a co-op guest plays the host's job: their own saved progress of it stays as it was
+            if (Net.Coop.I != null && Net.Coop.I.IsGuest) { Job.Changed = false; PersistSave(); return; }
             var raw = Job.Serialize();
             if (UseCloud) StartCoroutine(Acct.PushJob(Job.Id, Convert.ToBase64String(raw)));
             else Job.SaveLocal(raw);
@@ -650,6 +776,8 @@ namespace Banjjak
             Robots.RemoveAll();
             StartJob(Mathf.Max(0, JobDefs.IndexOf(Save.Current)));
             Washer.Refresh();
+            ApplyLookToHands();   // the account may have its own look
+            Net.Coop.I?.RefreshPresence();
             Hud?.OnModeChanged();
             Hud?.RefreshAccount();
         }
@@ -843,6 +971,69 @@ namespace Banjjak
         }
 
         void Shot(string name) => ScreenCapture.CaptureScreenshot(Path.Combine(autotestDir, name));
+
+        /// <summary>-avatartest: co-op characters in several poses, photographed from the front, the side and up close.</summary>
+        IEnumerator AvatarTest()
+        {
+            Player.InputEnabled = false;
+            StartJob(0);
+            SetMode(GameMode.Playing);
+            yield return new WaitForSeconds(.5f);
+            var c = Job.Spawn + new Vector3(0, 0, -3.2f);
+            var specs = new[]
+            {
+                ("bear-0-1", "곰 · 정면 조준", 0, 0f, false, 35f),
+                ("cat-2-2", "고양이 · 바닥 분사", 0, 38f, false, -30f),
+                ("rabbit-4-3", "토끼 · 앉아서 거품", 1, 22f, true, 20f),
+                ("penguin-3-0", "펭귄 · 바닥 세척기", 2, 30f, false, -20f),
+                ("frog-1-1", "개구리", 0, -20f, false, 0f),
+                ("panda-5-2", "판다", 0, 10f, false, 50f),
+            };
+            var made = new List<Net.Avatar>();
+            for (int i = 0; i < specs.Length; i++)
+            {
+                var (look, name, tool, pitch, crouch, yaw) = specs[i];
+                var a = Net.Avatar.Create("t" + i, name, Skins.Look.Parse(look));
+                a.transform.position = c + new Vector3(-4f + i * 1.6f, 0, i % 2 == 0 ? 0 : -.6f);
+                a.Pose(yaw, pitch, crouch);
+                a.Tool = tool; a.Spraying = true; a.Deg = 15; a.Agent = 1;
+                made.Add(a);
+            }
+            Hud.gameObject.SetActive(false);
+            yield return new WaitForSeconds(1.2f);
+            Player.SetPose(Job.Spawn + new Vector3(0, 0, .6f), 180, 6);
+            yield return new WaitForSeconds(.3f);
+            yield return ShotWait("avatars_front.png");
+            Player.SetPose(c + new Vector3(-8.5f, 0, -.3f), 90, 5);
+            yield return new WaitForSeconds(.3f);
+            yield return ShotWait("avatars_side.png");
+            for (int i = 0; i < 4; i++)
+            {
+                var a = made[i];
+                var cam = a.transform.position + Quaternion.Euler(0, a.transform.eulerAngles.y + 35, 0) * new Vector3(0, 0, 2.1f);
+                var d = a.transform.position - cam;
+                Player.SetPose(cam, Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg, 12);
+                yield return new WaitForSeconds(.3f);
+                yield return ShotWait($"avatar_close_{i}.png");
+            }
+            Hud.gameObject.SetActive(true);
+            foreach (var a in made) Destroy(a.gameObject);
+
+            // the 꾸미기 screen with its live preview
+            SetMode(GameMode.Menu);
+            Hud.ShowSkin(true);
+            yield return new WaitForSeconds(1f);
+            yield return ShotWait("skin_panel.png");
+            SetLook(new Skins.Look { Animal = 1, Suit = 2, Hat = 2, Fur = 4 });
+            Hud.ShowSkin(true);
+            yield return new WaitForSeconds(1f);
+            yield return ShotWait("skin_panel_cat.png");
+            testLog.AppendLine($"look saved: {Save.Look}");
+
+            File.WriteAllText(Path.Combine(autotestDir, "autotest.log"), testLog.ToString());
+            yield return new WaitForSeconds(.3f);
+            Application.Quit();
+        }
 
         IEnumerator ShotWait(string name)
         {

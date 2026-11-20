@@ -92,6 +92,7 @@ namespace Banjjak
                         var p = pos[i];
                         if ((p.x - x) * (p.x - x) + (p.y - z) * (p.y - z) >= r * r) continue;
                         cut[i] = true; n++;
+                        if (NetHooks.Recording) NetHooks.Cuts.Add(i);
                         var c = chunks[chunkOf[i]];
                         for (int v = vStart[i]; v < vStart[i] + 8; v++) c.Cols[v].a = 1;
                         c.Dirty = true;
@@ -122,6 +123,16 @@ namespace Banjjak
         public void Flush()
         {
             foreach (var c in chunks) if (c.Dirty && c.Mesh != null) { c.Mesh.SetColors(c.Cols); c.Dirty = false; }
+        }
+
+        /// <summary>Co-op: a blade someone else mowed (their mower pays them, not us).</summary>
+        public void CutIdx(int i)
+        {
+            if (i < 0 || i >= cut.Count || cut[i]) return;
+            cut[i] = true; CutCount++;
+            var c = chunks[chunkOf[i]];
+            for (int v = vStart[i]; v < vStart[i] + 8; v++) c.Cols[v].a = 1;
+            c.Dirty = true;
         }
 
         public bool[] CutState() => cut.ToArray();
@@ -216,6 +227,7 @@ namespace Banjjak
         {
             if (i < 0 || i >= Items.Count || Pulled[i]) return false;
             Pulled[i] = true; Count++;
+            if (NetHooks.Recording) NetHooks.Pulls.Add(i);
             Items[i].go.SetActive(false);
             return true;
         }
@@ -332,9 +344,11 @@ namespace Banjjak
 
         public bool Pick(int i)
         {
+            if (i < 0 || i >= Items.Count) return false;
             var it = Items[i];
             if (it.Picked) return false;
             it.Picked = true; it.Go.SetActive(false); Count++;
+            if (NetHooks.Recording) NetHooks.Picks.Add(i);
             return true;
         }
 

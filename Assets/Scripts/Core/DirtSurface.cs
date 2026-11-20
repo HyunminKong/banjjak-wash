@@ -313,6 +313,7 @@ namespace Banjjak
                                 if (s == 2 && d >= G.CleanT && nd < G.CleanT) cleaned++;
                                 DirtAmt[k] = val;
                                 Data[k * 4] = (byte)(val * 255 + .5f);
+                                if (NetHooks.Recording) Touch(k);
                             }
                         }
                         Data[k * 4 + 1] = 255;
@@ -326,6 +327,7 @@ namespace Banjjak
 
         public void StampFoam(Vector3 pw, float radius, float amount, int ai)
         {
+            if (NetHooks.Recording) NetHooks.Foams.Add(new NetHooks.FoamStamp { Surf = Index, P = pw, R = radius, Amount = amount, Agent = ai });
             EnsureFoam();
             var lp = transform.InverseTransformPoint(pw);
             float R = Mathf.Max(.75f, radius / CellSize), r2 = R * R;
@@ -350,6 +352,73 @@ namespace Banjjak
                 }
             TexDirty = true;
             Job.MarkFoamy(this);
+        }
+
+        // ------------------------------------------------------------------ co-op
+        /// <summary>This surface's position in CleanJob.Surfs (the same on every player's machine).</summary>
+        [System.NonSerialized] public int Index;
+        /// <summary>Cells whose dirt changed here since the last send, and the level each cell was last sent at.</summary>
+        [System.NonSerialized] public List<int> Touched;
+        [System.NonSerialized] public byte[] SentQ;
+        bool[] touchedFlag;
+        int remoteCleaned;
+
+        void Touch(int k)
+        {
+            if (touchedFlag == null) { touchedFlag = new bool[N]; Touched = new List<int>(); }
+            if (!touchedFlag[k]) { touchedFlag[k] = true; Touched.Add(k); }
+        }
+
+        public void ClearTouched()
+        {
+            if (Touched == null) return;
+            foreach (int k in Touched) touchedFlag[k] = false;
+            Touched.Clear();
+        }
+
+        /// <summary>
+        /// Dirt as a 4-bit level for the network (rounded up, so nobody ends up cleaner than the sender), except that a
+        /// cell the sender counts as clean always goes out as clean (level 2 = 0.133 &lt; CleanT).
+        /// </summary>
+        public static int Q(float d)
+        {
+            if (d <= 0) return 0;
+            int q = Mathf.Clamp(Mathf.CeilToInt(d * 15f - .001f), 0, 15);
+            return d < G.CleanT ? Mathf.Min(q, 2) : q;
+        }
+
+        /// <summary>Start of co-op on this job (or after a snapshot): what everyone already has needs no sending.</summary>
+        public void InitSent()
+        {
+            SentQ = new byte[N];
+            for (int k = 0; k < N; k++) SentQ[k] = (byte)Q(DirtAmt[k]);
+            ClearTouched();
+        }
+
+        /// <summary>
+        /// Someone else's cleaning: dirt only ever goes down, so keeping the smaller value makes every player end up with
+        /// the same surface no matter in what order updates arrive.
+        /// </summary>
+        public void ApplyRemote(int k, int q)
+        {
+            if (k < 0 || k >= N || Surf[k] == 0) return;
+            if (SentQ != null && q < SentQ[k]) SentQ[k] = (byte)q;
+            float v = q / 15f, d = DirtAmt[k];
+            if (v >= d) return;
+            float nv = q == 0 ? 0 : v;   // keep the sender's level exactly, so both screens match cell for cell
+            if (Surf[k] == 2 && d >= G.CleanT && nv < G.CleanT) remoteCleaned++;
+            DirtAmt[k] = nv;
+            Data[k * 4] = (byte)(nv * 255 + .5f);
+            Data[k * 4 + 1] = 255;   // looks freshly sprayed
+            TexDirty = true;
+        }
+
+        /// <summary>After a batch of ApplyRemote: count newly clean cells toward progress (and part / job completion).</summary>
+        public void EndRemote()
+        {
+            if (!TexDirty) return;
+            Job.MarkWet(this);
+            if (remoteCleaned > 0) { int c = remoteCleaned; remoteCleaned = 0; if (!Done) Job.OnCleaned(this, c); }
         }
 
         /// <summary>Dry out a little. Returns true while still wet.</summary>

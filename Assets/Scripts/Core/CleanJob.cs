@@ -105,6 +105,7 @@ namespace Banjjak
             {
                 var s = go.AddComponent<DirtSurface>();
                 s.Setup(Job, comp, o.Ground, o.Cell > 0 ? o.Cell : (o.Ground ? G.GroundCell : G.Cell), Job.Surfs.Count);
+                s.Index = Job.Surfs.Count;
                 comp.Surfs.Add(s);
                 Job.Surfs.Add(s);
             }
@@ -544,9 +545,9 @@ namespace Banjjak
         /// finish the job if nothing is left. Without this a job could sit at 100% with nothing to clean and never
         /// unlock the next one.
         /// </summary>
-        public void SettleAfterLoad()
+        public void SettleAfterLoad(bool payParts = true)
         {
-            foreach (var c in loadDone)
+            if (payParts) foreach (var c in loadDone)
             {
                 int pay = Mathf.Max(3, Mathf.RoundToInt(c.Total * PayPerCell));
                 Earned += pay;

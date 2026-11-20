@@ -93,6 +93,8 @@ namespace Banjjak
             BuildMenu();
             BuildLogin();
             BuildFps();
+            BuildCoop();
+            BuildSkin();
             RefreshTools();
             OnJobChanged();
             OnModeChanged();
@@ -129,6 +131,8 @@ namespace Banjjak
             menuMoney = Label(head, "", 26, Color.white, TextAnchor.MiddleRight, A(1, 1), A(1, 1), A(0, -6), A(300, 40), true);
             var tj = Btn(head, "의뢰", A(1, 1), A(1, 1), A(-128, -56), A(120, 36), Accent, Color.white, () => ShowShop(false), 15);
             var ts = Btn(head, "장비 가게", A(1, 1), A(1, 1), A(0, -56), A(120, 36), G.Hex(0xeef2f7), Ink, () => ShowShop(true), 15);
+            coopBtn = Btn(head, "같이 하기", A(1, 1), A(1, 1), A(-256, -56), A(120, 36), G.Hex(0xffd166), Ink, () => ShowCoop(true), 15);
+            Btn(head, "꾸미기", A(1, 1), A(1, 1), A(-384, -56), A(120, 36), G.Hex(0xf7c6d9), Ink, () => ShowSkin(true), 15);
             accountBtn = Btn(head, "", A(1, 1), A(1, 1), A(-312, -8), A(230, 34), new Color(1, 1, 1, .16f), Color.white, OnAccountButton, 14);
             accountText = accountBtn.GetComponentInChildren<Text>();
             tabJobs = (Image)tj.targetGraphic; tabShop = (Image)ts.targetGraphic;
@@ -272,8 +276,14 @@ namespace Banjjak
                 bool unlocked = gm.Unlocked(i), done = gm.IsDone(i);
                 float prog = i == gm.JobIndex && gm.Job != null ? gm.Job.Progress : gm.SavedProgress(d.Id);
                 bool inProgress = !(i == gm.JobIndex && gm.Job != null && gm.Job.Completed) && prog > .001f;
-                c.button.interactable = unlocked;
-                if (!unlocked) { c.btnText.text = "잠김"; c.btn.color = G.Hex(0xc3cad3); c.state.text = "이전 의뢰를 먼저 끝내세요"; }
+                var coop = Banjjak.Net.Coop.I;
+                bool guest = coop != null && coop.IsGuest;
+                bool coopJob = coop != null && coop.Active && i == gm.JobIndex && gm.Job != null;
+                c.button.interactable = unlocked || (guest && coopJob);
+                // co-op: the host's job is the one everyone plays; guests can't pick others
+                if (coopJob) { c.btnText.text = "같이 닦기"; c.btn.color = G.Hex(0xf0a020); c.state.text = $"같이 하는 현장 · {Mathf.FloorToInt(prog * 100)}%"; }
+                else if (guest) { c.btnText.text = "방장이 골라요"; c.btn.color = G.Hex(0xc3cad3); c.state.text = unlocked ? "" : "이전 의뢰를 먼저 끝내세요"; }
+                else if (!unlocked) { c.btnText.text = "잠김"; c.btn.color = G.Hex(0xc3cad3); c.state.text = "이전 의뢰를 먼저 끝내세요"; }
                 else if (inProgress) { c.btnText.text = "이어서 하기"; c.btn.color = Accent; c.state.text = $"진행 {Mathf.FloorToInt(prog * 100)}%" + (done ? " · 완료한 적 있음" : ""); }
                 else if (done) { c.btnText.text = "다시 하기"; c.btn.color = Good; c.state.text = "완료"; }
                 else { c.btnText.text = "작업 시작"; c.btn.color = Accent; c.state.text = ""; }
@@ -295,7 +305,225 @@ namespace Banjjak
         Text loginMsg;
         Button loginBtn, signupBtn;
         int loginClosedFrame = -1;
-        public bool LoginBlocksEsc => (loginPanel != null && loginPanel.activeSelf) || loginClosedFrame == Time.frameCount;
+        public bool LoginBlocksEsc => (loginPanel != null && loginPanel.activeSelf) || (coopPanel != null && coopPanel.activeSelf)
+                                      || (skinPanel != null && skinPanel.activeSelf) || loginClosedFrame == Time.frameCount;
+
+        // ------------------------------------------------------------------ 꾸미기 (character look)
+        const int PreviewLayer = 12;
+        GameObject skinPanel;
+        Camera previewCam;
+        Banjjak.Net.Avatar previewAvatar;
+        RenderTexture previewRT;
+        readonly List<(Image img, Text txt, System.Func<bool> on, bool swatch)> skinBtns = new List<(Image, Text, System.Func<bool>, bool)>();
+        float previewT;
+
+        void BuildSkin()
+        {
+            var p = Box("skin", root, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(0, 0));
+            p.anchorMin = A(0, 0); p.anchorMax = A(1, 1); p.sizeDelta = A(0, 0);
+            skinPanel = p.gameObject;
+            var bg = p.gameObject.AddComponent<Image>(); bg.color = new Color(.03f, .05f, .08f, .55f); bg.raycastTarget = true;
+            var card = Box("card", p, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(820, 580));
+            Panel(card, new Color(1, 1, 1, .98f));
+            Label(card, "꾸미기", 13, Accent, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(32, -20), A(200, 20), true);
+            Label(card, "내 캐릭터", 24, Ink, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(32, -40), A(300, 32), true);
+
+            // live preview: the character on its own layer, filmed by its own camera into a texture
+            var pv = Box("preview", card, A(0, 1), A(0, 1), A(32, -84), A(300, 400));
+            Panel(pv, G.Hex(0xe8eef6));
+            previewRT = new RenderTexture(600, 800, 24) { name = "skinPreview" };
+            var raw = new GameObject("rt", typeof(RectTransform)).AddComponent<RawImage>();
+            raw.transform.SetParent(pv, false);
+            ((RectTransform)raw.transform).sizeDelta = A(300, 400);
+            raw.texture = previewRT;
+            raw.raycastTarget = false;
+
+            float y = -84;
+            void Row(string name, int count, System.Func<int, string> label, System.Func<int, Color?> swatch, System.Action<int> pick, System.Func<int, bool> on, int perRow)
+            {
+                Label(card, name, 15, Ink, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(360, y), A(110, 38), true);
+                float w = 92, gap = 8;
+                for (int i = 0; i < count; i++)
+                {
+                    int idx = i, r = i / perRow, c = i % perRow;
+                    var sw = swatch(i);
+                    var b = Btn(card, sw.HasValue ? "" : label(i), A(0, 1), A(0, 1), A(450 + c * (w + gap), y - r * 44), A(w, 38),
+                        sw ?? G.Hex(0xeef2f7), Ink, () => { pick(idx); OnLookChanged(); }, 14);
+                    skinBtns.Add(((Image)b.targetGraphic, b.GetComponentInChildren<Text>(), () => on(idx), sw.HasValue));
+                }
+                y -= 44 * ((count + perRow - 1) / perRow) + 14;
+            }
+            var a = Skins.Animals;
+            Row("캐릭터", a.Length, i => a[i].Name, i => null, i => SetLook(l => { l.Animal = i; return l; }), i => CurLook().Animal == i, 3);
+            Row("털 색", Skins.FurNames.Length, i => Skins.FurNames[i], i => i == 0 ? (Color?)null : Skins.Furs[i], i => SetLook(l => { l.Fur = i; return l; }), i => CurLook().Fur == i, 3);
+            Row("작업복", Skins.Suits.Length, i => Skins.SuitNames[i], i => Skins.Suits[i], i => SetLook(l => { l.Suit = i; return l; }), i => CurLook().Suit == i, 3);
+            Row("모자", Skins.HatNames.Length, i => Skins.HatNames[i], i => null, i => SetLook(l => { l.Hat = i; return l; }), i => CurLook().Hat == i, 4);
+            Btn(card, "닫기", A(.5f, 0), A(.5f, 0), A(0, 18), A(160, 42), Accent, Color.white, () => ShowSkin(false), 15);
+            skinPanel.SetActive(false);
+        }
+
+        Skins.Look CurLook() => Skins.Look.Parse(gm.Save.Look);
+
+        void SetLook(System.Func<Skins.Look, Skins.Look> change) => gm.SetLook(change(CurLook()));
+
+        void OnLookChanged()
+        {
+            RefreshSkin();
+            if (previewAvatar != null) previewAvatar.SetLook(CurLook());
+        }
+
+        void RefreshSkin()
+        {
+            foreach (var (img, txt, on, swatch) in skinBtns)
+            {
+                bool sel = on();
+                if (swatch) txt.text = sel ? "●" : "";
+                else { img.color = sel ? Accent : G.Hex(0xeef2f7); txt.color = sel ? Color.white : Ink; }
+                if (swatch) txt.color = Color.white;
+            }
+        }
+
+        public void ShowSkin(bool on)
+        {
+            if (skinPanel == null) return;
+            skinPanel.SetActive(on);
+            if (!on) { loginClosedFrame = Time.frameCount; if (previewCam != null) previewCam.enabled = false; return; }
+            if (previewAvatar == null)
+            {
+                previewAvatar = Banjjak.Net.Avatar.Create("preview", "", CurLook(), true);
+                previewAvatar.Layer = PreviewLayer;
+                previewAvatar.transform.position = new Vector3(0, -300, 0);
+                Banjjak.Net.Avatar.SetLayer(previewAvatar.transform, PreviewLayer);
+                var cg = new GameObject("PreviewCam");
+                previewCam = cg.AddComponent<Camera>();
+                previewCam.cullingMask = 1 << PreviewLayer;
+                previewCam.clearFlags = CameraClearFlags.SolidColor;
+                previewCam.backgroundColor = G.Hex(0xe8eef6);
+                previewCam.fieldOfView = 30;
+                previewCam.targetTexture = previewRT;
+                // whole body, hat to boots, with a little room around
+                cg.transform.position = new Vector3(0, -300 + 1.15f, 4.3f);
+                cg.transform.LookAt(new Vector3(0, -300 + .98f, 0));
+                if (gm.Player != null && gm.Player.Cam != null) gm.Player.Cam.cullingMask &= ~(1 << PreviewLayer);
+            }
+            else previewAvatar.SetLook(CurLook());
+            previewCam.enabled = true;
+            RefreshSkin();
+        }
+
+        void UpdateSkin()
+        {
+            if (skinPanel == null || !skinPanel.activeSelf || previewAvatar == null) return;
+            previewT += Time.unscaledDeltaTime;
+            // turn slowly back and forth so the face, the hat and the tool are all seen
+            previewAvatar.Pose(Mathf.Sin(previewT * .6f) * 40, 6);
+            var kb = UnityEngine.InputSystem.Keyboard.current;
+            if (kb != null && kb.escapeKey.wasPressedThisFrame) ShowSkin(false);
+            if (gm.Mode != GameMode.Menu) ShowSkin(false);
+        }
+
+        // ------------------------------------------------------------------ co-op (같이 하기)
+        Button coopBtn;
+        GameObject coopPanel, coopIdle, coopRoom;
+        InputField coopCode;
+        Text coopStatus, coopCodeBig, coopLink, coopNames;
+        RectTransform coopBadge; Text coopBadgeText;
+        float coopRefreshT, coopMenuT;
+
+        void BuildCoop()
+        {
+            var p = Box("coop", root, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(0, 0));
+            p.anchorMin = A(0, 0); p.anchorMax = A(1, 1); p.sizeDelta = A(0, 0);
+            coopPanel = p.gameObject;
+            var bg = p.gameObject.AddComponent<Image>(); bg.color = new Color(.03f, .05f, .08f, .55f); bg.raycastTarget = true;
+            var card = Box("card", p, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(460, 430));
+            Panel(card, new Color(1, 1, 1, .98f));
+            Label(card, "같이 하기", 13, Accent, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(36, -20), A(200, 20), true);
+            Label(card, "친구와 같은 현장 닦기", 24, Ink, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(36, -40), A(390, 32), true);
+            var d = Label(card, "최대 4명이에요. 방장이 고른 현장으로 다 같이 이동하고, 누가 닦든 모두의 화면에서 지워져요. 보상은 각자 받아요.", 13, Sub, TextAnchor.UpperLeft, A(0, 1), A(0, 1), A(36, -80), A(390, 40));
+            d.horizontalOverflow = HorizontalWrapMode.Wrap;
+
+            var idle = Box("idle", card, A(.5f, 1), A(.5f, 1), A(0, -128), A(460, 200));
+            coopIdle = idle.gameObject;
+            Btn(idle, "방 만들기", A(.5f, 1), A(.5f, 1), A(0, 0), A(388, 46), Accent, Color.white, () => { Banjjak.Net.Coop.I.Host(); RefreshCoop(); }, 16);
+            Label(idle, "또는 친구의 방 코드로 참가", 13, Sub, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(36, -64), A(390, 20));
+            var f = Box("code", idle, A(0, 1), A(0, 1), A(36, -92), A(250, 46));
+            var fimg = Panel(f, G.Hex(0xf1f4f8)); fimg.raycastTarget = true;
+            var ft = Label(f, "", 22, Ink, TextAnchor.MiddleCenter, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(240, 42), true);
+            var fph = Label(f, "숫자 4자리", 15, new Color(Sub.r, Sub.g, Sub.b, .7f), TextAnchor.MiddleCenter, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(240, 42));
+            coopCode = f.gameObject.AddComponent<InputField>();
+            coopCode.textComponent = ft; coopCode.placeholder = fph; coopCode.targetGraphic = fimg;
+            coopCode.characterLimit = 4; coopCode.contentType = InputField.ContentType.IntegerNumber;
+            Btn(idle, "참가", A(0, 1), A(0, 1), A(298, -92), A(126, 46), Good, Color.white, () => { Banjjak.Net.Coop.I.Join(coopCode.text); RefreshCoop(); }, 16);
+
+            var room = Box("room", card, A(.5f, 1), A(.5f, 1), A(0, -128), A(460, 220));
+            coopRoom = room.gameObject;
+            Label(room, "방 코드", 13, Sub, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(36, 0), A(200, 18));
+            coopCodeBig = Label(room, "", 44, Ink, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(36, -18), A(200, 54), true);
+            coopLink = Label(room, "", 12, Sub, TextAnchor.UpperLeft, A(0, 1), A(0, 1), A(36, -74), A(390, 34));
+            coopLink.horizontalOverflow = HorizontalWrapMode.Wrap;
+            coopNames = Label(room, "", 15, Ink, TextAnchor.UpperLeft, A(0, 1), A(0, 1), A(236, -6), A(200, 90));
+            Btn(room, "방 나가기", A(0, 1), A(0, 1), A(36, -116), A(150, 40), G.Hex(0xeef2f7), Ink, () => { Banjjak.Net.Coop.I.Leave(); RefreshCoop(); }, 14);
+
+            coopStatus = Label(card, "", 13, Sub, TextAnchor.MiddleLeft, A(0, 0), A(0, 0), A(36, 70), A(390, 22));
+            Btn(card, "닫기", A(.5f, 0), A(.5f, 0), A(0, 18), A(140, 40), Accent, Color.white, () => ShowCoop(false), 15);
+            coopPanel.SetActive(false);
+
+            // in-game badge (top left, under the FPS readout)
+            coopBadge = Box("coopBadge", root, A(0, 1), A(0, 1), A(24, -152), A(210, 26));
+            Panel(coopBadge, new Color(1, .82f, .4f, .92f), true);
+            coopBadgeText = Label(coopBadge, "", 13, Ink, TextAnchor.MiddleCenter, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(210, 26), true);
+            coopBadge.gameObject.SetActive(false);
+        }
+
+        public void ShowCoop(bool on)
+        {
+            if (coopPanel == null) return;
+            coopPanel.SetActive(on);
+            if (!on) loginClosedFrame = Time.frameCount;
+            RefreshCoop();
+        }
+
+        public void RefreshCoop()
+        {
+            var c = Banjjak.Net.Coop.I;
+            if (coopPanel == null || c == null) return;
+            coopBtn.gameObject.SetActive(CloudConfig.Enabled);
+            coopIdle.SetActive(!c.Active);
+            coopRoom.SetActive(c.Active);
+            coopStatus.text = c.Status;
+            if (gm != null && gm.Mode == GameMode.Menu && menuPanel != null) RefreshMenu();
+            if (c.Active)
+            {
+                coopCodeBig.text = c.Code;
+                coopLink.text = "친구에게 코드를 알려 주거나 이 주소를 보내세요\nhyunminkong.github.io/banjjak-wash/?room=" + c.Code;
+                coopNames.text = string.Join("\n", c.Names());
+            }
+        }
+
+        void UpdateCoop()
+        {
+            var c = Banjjak.Net.Coop.I;
+            if (c == null || coopBadge == null || gm == null) return;
+            bool show = c.Active && gm.Mode != GameMode.Menu;
+            coopBadge.gameObject.SetActive(show);
+            // the job cards follow the room (the host's job turns orange, progress moves) while the menu is open
+            if (c.Active && gm.Mode == GameMode.Menu)
+            {
+                coopMenuT += Time.unscaledDeltaTime;
+                if (coopMenuT > 1) { coopMenuT = 0; RefreshMenu(); }
+            }
+            if (show) coopBadgeText.text = c.Connected ? $"같이 하기 {c.Code} · {c.Names().Count}명" : c.Status;
+            if (coopPanel.activeSelf)
+            {
+                coopRefreshT += Time.unscaledDeltaTime;
+                if (coopRefreshT > .5f) { coopRefreshT = 0; RefreshCoop(); }
+                var kb = UnityEngine.InputSystem.Keyboard.current;
+                if (kb != null && kb.escapeKey.wasPressedThisFrame) ShowCoop(false);
+                if (kb != null && (kb.enterKey.wasPressedThisFrame || kb.numpadEnterKey.wasPressedThisFrame) && !c.Active) { c.Join(coopCode.text); RefreshCoop(); }
+                if (gm.Mode != GameMode.Menu) coopPanel.SetActive(false);
+            }
+        }
 
         void OnAccountButton()
         {
@@ -737,6 +965,8 @@ namespace Banjjak
             // narrow / tall windows (e.g. a browser side pane) scale by width so nothing is cut off
             if (scaler != null) scaler.matchWidthOrHeight = (float)Screen.width / Mathf.Max(1, Screen.height) < 1.5f ? 0f : .5f;
             UpdateFps();
+            UpdateCoop();
+            UpdateSkin();
             if (loginPanel != null && loginPanel.activeSelf)
             {
                 var kb = Keyboard.current;
