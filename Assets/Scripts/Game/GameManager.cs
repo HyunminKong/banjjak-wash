@@ -64,23 +64,12 @@ namespace Banjjak
         void Awake()
         {
             I = this;
-            if (Application.platform == RuntimePlatform.WebGLPlayer)
-            {
-                // browser: let requestAnimationFrame pace frames and go a little easier on the GPU
-                if (GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset urp)
-                {
-                    urp.msaaSampleCount = 2;
-                    urp.shadowDistance = 32;
-                }
-            }
-            else
-            {
-                QualitySettings.vSyncCount = 1;
-                Application.targetFrameRate = 144;
-            }
             LoadSave();
             var args = Environment.GetCommandLineArgs();
             for (int i = 0; i < args.Length - 1; i++) if (args[i] == "-autotest") autotestDir = args[i + 1];
+            // graphics options from Esc → 설정 (the automated test always uses the defaults)
+            if (autotestDir != null) GfxSettings.Defaults(); else GfxSettings.Load();
+            GfxSettings.Apply();
             // -bakereach <dir>: work out every job's unreachable dirt cells and write them there (Assets/Resources/Reach)
             for (int i = 0; i < args.Length - 1; i++) if (args[i] == "-bakereach") reachBakeDir = args[i + 1];
             if (autotestDir != null && reachBakeDir != null) CleanJob.UseReachBake = false;
@@ -365,6 +354,8 @@ namespace Banjjak
             var bl = prof.Add<Bloom>(true); bl.threshold.Override(1.05f); bl.intensity.Override(.3f); bl.scatter.Override(.6f);
             var vg = prof.Add<Vignette>(true); vg.intensity.Override(.17f); vg.smoothness.Override(.45f);
             vol.profile = prof;
+            GfxSettings.Bloom = bl;
+            GfxSettings.Apply();
         }
 
         /// <summary>Ambient light as explicit spherical harmonics: blue sky from above, green-grey bounce from below.</summary>
@@ -449,7 +440,9 @@ namespace Banjjak
                         if (Cursor.lockState != CursorLockMode.Locked && Application.isFocused) SetMode(GameMode.Paused);
                         break;
                     case GameMode.Paused:
-                        if (kb.escapeKey.wasPressedThisFrame || (mouse.leftButton.wasPressedThisFrame && !overUI)) SetMode(GameMode.Playing);
+                        // with the settings open, Esc only closes them and clicks beside them do nothing
+                        if (Hud.SettingsOpen) { if (kb.escapeKey.wasPressedThisFrame) Hud.ShowSettings(false); }
+                        else if (kb.escapeKey.wasPressedThisFrame || (mouse.leftButton.wasPressedThisFrame && !overUI)) SetMode(GameMode.Playing);
                         break;
                     case GameMode.Menu:
                         if (kb.escapeKey.wasPressedThisFrame && Job != null && !Hud.LoginBlocksEsc) SetMode(GameMode.Paused);
@@ -829,6 +822,20 @@ namespace Banjjak
             var drone = Robots.Active.Find(r => r.Type == "drone");
             testLog.AppendLine($"robots {Robots.Active.Count}: trash picked +{Job.Trash.Count - trash0}, grass cut +{Job.Grass.CutCount - cut0}, job progress {floor0 * 100:0.0}% -> {Job.Progress * 100:0.0}%, drone at {drone.transform.position}");
             Robots.RemoveAll();
+
+            // graphics settings: low preset really lowers the render settings, and the settings card renders
+            {
+                var urp = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
+                string Read() => urp == null ? "no URP asset" : $"scale {urp.renderScale:0.00}, MSAA {urp.msaaSampleCount}, shadows {urp.shadowDistance}m x{urp.shadowCascadeCount} {urp.mainLightShadowmapResolution}px";
+                testLog.AppendLine($"graphics high: {Read()}, bloom {GfxSettings.Bloom?.active}");
+                GfxSettings.Quality = 0; GfxSettings.Scale = 70; GfxSettings.Apply();
+                Hud.TestShowSettings(true);
+                yield return new WaitForSeconds(.3f);
+                yield return ShotWait("settings_low.png");
+                testLog.AppendLine($"graphics low: {Read()}, bloom {GfxSettings.Bloom?.active}, sun shadows {RenderSettings.sun.shadows}");
+                Hud.TestShowSettings(false);
+                GfxSettings.Defaults(); GfxSettings.Apply();
+            }
 
             File.WriteAllText(Path.Combine(autotestDir, "autotest.log"), testLog.ToString());
             yield return new WaitForSeconds(.3f);

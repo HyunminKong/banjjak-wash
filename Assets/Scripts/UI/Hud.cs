@@ -92,6 +92,7 @@ namespace Banjjak
             BuildResult();
             BuildMenu();
             BuildLogin();
+            BuildFps();
             RefreshTools();
             OnJobChanged();
             OnModeChanged();
@@ -384,6 +385,7 @@ namespace Banjjak
             if (!inGame) targetBox.gameObject.SetActive(false);
             menuPanel.SetActive(m == GameMode.Menu);
             pausePanel.SetActive(m == GameMode.Paused && !TestMode);
+            if (m != GameMode.Paused) ShowSettings(false);
             resultPanel.SetActive(m == GameMode.Result);
             if (m == GameMode.Menu) RefreshMenu();
         }
@@ -583,14 +585,103 @@ namespace Banjjak
             var p = Box("pause", root, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(4000, 4000));
             pausePanel = p.gameObject;
             var bg = p.gameObject.AddComponent<Image>(); bg.color = new Color(.05f, .08f, .12f, .45f); bg.raycastTarget = false;
-            var card = Box("card", p, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(460, 270));
+            var card = Box("card", p, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(460, 326));
             Panel(card, new Color(1, 1, 1, .96f));
             Label(card, "일시정지", 14, Accent, TextAnchor.MiddleCenter, A(.5f, 1), A(.5f, 1), A(0, -26), A(420, 20), true);
             pauseTitle = Label(card, "반짝 워시", 34, Ink, TextAnchor.MiddleCenter, A(.5f, 1), A(.5f, 1), A(0, -64), A(420, 44), true);
             pauseDesc = Label(card, "", 14, Sub, TextAnchor.UpperCenter, A(.5f, 1), A(.5f, 1), A(0, -102), A(400, 60));
             pauseDesc.horizontalOverflow = HorizontalWrapMode.Wrap;
+            Btn(card, "설정 · 화질과 FPS", A(.5f, 0), A(.5f, 0), A(0, 86), A(398, 42), G.Hex(0xeef2f7), Ink, () => ShowSettings(true), 15);
             Btn(card, "계속하기", A(.5f, 0), A(.5f, 0), A(-104, 26), A(190, 48), Accent, Color.white, () => gm.SetMode(GameMode.Playing), 17);
             Btn(card, "의뢰 목록", A(.5f, 0), A(.5f, 0), A(104, 26), A(190, 48), G.Hex(0xeef2f7), Ink, () => gm.SetMode(GameMode.Menu), 17);
+            BuildSettings(p);
+        }
+
+        // ------------------------------------------------------------------ settings (Esc → 설정)
+        GameObject settingsPanel;
+        readonly List<(Image img, Text txt, System.Func<bool> on)> settingBtns = new List<(Image, Text, System.Func<bool>)>();
+        public bool SettingsOpen => settingsPanel != null && settingsPanel.activeInHierarchy;
+
+        public void ShowSettings(bool on)
+        {
+            if (settingsPanel == null) return;
+            settingsPanel.SetActive(on);
+            if (on) RefreshSettings();
+        }
+
+        /// <summary>Test only: the pause screen is hidden in test mode, so show the settings on their own.</summary>
+        public void TestShowSettings(bool on) { pausePanel.SetActive(on); ShowSettings(on); }
+
+        void BuildSettings(RectTransform parent)
+        {
+            var card = Box("settings", parent, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(560, 440));
+            settingsPanel = card.gameObject;
+            var cardBg = Panel(card, new Color(1, 1, 1, .98f));
+            cardBg.raycastTarget = true;   // clicks on the card never reach the game
+            Label(card, "설정", 14, Accent, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(36, -22), A(200, 20), true);
+            Label(card, "화질과 FPS", 26, Ink, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(36, -46), A(400, 34), true);
+            var hint = Label(card, "게임이 끊기면 화질을 낮추거나 해상도를 줄여 보세요. 이 기기에만 저장돼요.", 13, Sub, TextAnchor.UpperLeft, A(0, 1), A(0, 1), A(36, -86), A(490, 36));
+            hint.horizontalOverflow = HorizontalWrapMode.Wrap;
+
+            float y = -134;
+            void Row(string name, string[] labels, System.Action<int> pick, System.Func<int, bool> isOn)
+            {
+                Label(card, name, 15, Ink, TextAnchor.MiddleLeft, A(0, 1), A(0, 1), A(36, y), A(110, 40), true);
+                float w = (560 - 36 - 150 - 8f * (labels.Length - 1)) / labels.Length;
+                for (int i = 0; i < labels.Length; i++)
+                {
+                    int idx = i;
+                    var b = Btn(card, labels[i], A(0, 1), A(0, 1), A(150 + i * (w + 8), y), A(w, 40), G.Hex(0xeef2f7), Ink, () => { pick(idx); RefreshSettings(); }, 14);
+                    settingBtns.Add(((Image)b.targetGraphic, b.GetComponentInChildren<Text>(), () => isOn(idx)));
+                }
+                y -= 56;
+            }
+            Row("화질", GfxSettings.QualityNames, i => GfxSettings.SetQuality(i), i => GfxSettings.Quality == i);
+            var scaleNames = new string[GfxSettings.Scales.Length];
+            for (int i = 0; i < scaleNames.Length; i++) scaleNames[i] = GfxSettings.Scales[i] + "%";
+            Row("해상도", scaleNames, i => GfxSettings.SetScale(GfxSettings.Scales[i]), i => GfxSettings.Scale == GfxSettings.Scales[i]);
+            Row("FPS 제한", new[] { "30", "60", "제한 없음" }, i => GfxSettings.SetFps(GfxSettings.FpsCaps[i]), i => GfxSettings.Fps == GfxSettings.FpsCaps[i]);
+            Row("FPS 표시", new[] { "끄기", "켜기" }, i => GfxSettings.SetShowFps(i == 1), i => GfxSettings.ShowFps == (i == 1));
+            Btn(card, "닫기", A(.5f, 0), A(.5f, 0), A(0, 22), A(200, 44), Accent, Color.white, () => ShowSettings(false), 16);
+            settingsPanel.SetActive(false);
+        }
+
+        void RefreshSettings()
+        {
+            foreach (var (img, txt, on) in settingBtns)
+            {
+                bool sel = on();
+                img.color = sel ? Accent : G.Hex(0xeef2f7);
+                txt.color = sel ? Color.white : Ink;
+            }
+        }
+
+        // FPS readout (top left, under the job card), on when 설정 → FPS 표시 is on
+        RectTransform fpsBox;
+        Text fpsText;
+        int fpsFrames;
+        float fpsT;
+
+        void BuildFps()
+        {
+            fpsBox = Box("fps", root, A(0, 1), A(0, 1), A(24, -122), A(92, 26));
+            Panel(fpsBox, new Color(1, 1, 1, .85f), true);
+            fpsText = Label(fpsBox, "", 13, Ink, TextAnchor.MiddleCenter, A(.5f, .5f), A(.5f, .5f), A(0, 0), A(92, 26), true);
+            fpsBox.gameObject.SetActive(false);
+        }
+
+        void UpdateFps()
+        {
+            if (fpsBox == null) return;
+            // in play and pause only: on the job menu it would float beside the title
+            fpsBox.gameObject.SetActive(GfxSettings.ShowFps && gm != null && gm.Mode != GameMode.Menu);
+            fpsFrames++;
+            fpsT += Time.unscaledDeltaTime;
+            if (fpsT >= .5f)
+            {
+                fpsText.text = Mathf.RoundToInt(fpsFrames / fpsT) + " FPS";
+                fpsFrames = 0; fpsT = 0;
+            }
         }
 
         void BuildResult()
@@ -645,6 +736,7 @@ namespace Banjjak
         {
             // narrow / tall windows (e.g. a browser side pane) scale by width so nothing is cut off
             if (scaler != null) scaler.matchWidthOrHeight = (float)Screen.width / Mathf.Max(1, Screen.height) < 1.5f ? 0f : .5f;
+            UpdateFps();
             if (loginPanel != null && loginPanel.activeSelf)
             {
                 var kb = Keyboard.current;
