@@ -266,8 +266,43 @@ namespace Banjjak
                 }
             }
             foreach (var s in Surfs) s.Init(occ, s.Comp.Obj.HighOK);
+            if (UseReachBake) ApplyReachBake();
             ComputeTotals();
             PayPerCell = Total > 0 ? Reward * Mul * .4f / Total : 0;
+        }
+
+        /// <summary>Off only while ReachCheck bakes, so it sees every cell.</summary>
+        public static bool UseReachBake = true;
+
+        /// <summary>
+        /// Leave out the dirt cells no spray line can reach from anywhere the player can stand: pressed against a wall,
+        /// shut in under a ramp or a deck, the back of a door. Worked out ahead of time by ReachCheck (the automated
+        /// test with -bakereach) and shipped as Resources/Reach/&lt;job id&gt;.bytes, so loading a job costs nothing extra.
+        /// </summary>
+        void ApplyReachBake()
+        {
+            var ta = Resources.Load<TextAsset>("Reach/" + Id);
+            if (ta == null) return;
+            using (var r = new System.IO.BinaryReader(new System.IO.MemoryStream(ta.bytes)))
+            {
+                if (r.ReadInt32() != ReachCheck.BakeMagic) return;
+                int n = r.ReadInt32();
+                for (int i = 0; i < n; i++)
+                {
+                    int cellsN = r.ReadInt32(), dirtCells = r.ReadInt32(), cnt = r.ReadInt32();
+                    var idx = new int[cnt];
+                    for (int j = 0; j < cnt; j++) idx[j] = r.ReadInt32();
+                    if (i >= Surfs.Count) continue;
+                    var s = Surfs[i];
+                    // geometry changed since the bake: skip rather than hide the wrong cells
+                    if (s.N != cellsN || Mathf.Abs(s.DirtCellCount() - dirtCells) > dirtCells * .01f + 2)
+                    {
+                        Debug.LogWarning($"[Banjjak] reach bake out of date for {Id} / {s.Comp.Obj.Name} / {s.Comp.Name}");
+                        continue;
+                    }
+                    if (cnt > 0) s.HideCells(idx);
+                }
+            }
         }
 
         static Bounds TransformBounds(Transform t, Bounds local)

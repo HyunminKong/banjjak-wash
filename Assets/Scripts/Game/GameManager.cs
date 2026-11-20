@@ -58,7 +58,7 @@ namespace Banjjak
             Shader.SetGlobalFloat("_DirtHL", Highlight ? 1 : 0);
             Toast(Highlight ? "남은 때 표시 켬" : "남은 때 표시 끔", Highlight ? "주황색으로 빛나는 곳이 아직 더러운 곳이에요" : "", ToastKind.Info);
         }
-        string autotestDir;
+        string autotestDir, reachBakeDir;
         readonly StringBuilder testLog = new StringBuilder();
 
         void Awake()
@@ -81,6 +81,9 @@ namespace Banjjak
             LoadSave();
             var args = Environment.GetCommandLineArgs();
             for (int i = 0; i < args.Length - 1; i++) if (args[i] == "-autotest") autotestDir = args[i + 1];
+            // -bakereach <dir>: work out every job's unreachable dirt cells and write them there (Assets/Resources/Reach)
+            for (int i = 0; i < args.Length - 1; i++) if (args[i] == "-bakereach") reachBakeDir = args[i + 1];
+            if (autotestDir != null && reachBakeDir != null) CleanJob.UseReachBake = false;
             if (autotestDir != null) Application.logMessageReceived += (msg, stack, type) => { if (type == LogType.Error || type == LogType.Exception) testLog.AppendLine("[" + type + "] " + msg + "\n" + stack); };
 
             Physics.IgnoreLayerCollision(Layers.Player, Layers.SprayOnly, true);
@@ -680,6 +683,8 @@ namespace Banjjak
             yield return ShotWait("00_menu.png");
             Mode = GameMode.Playing; Hud.OnModeChanged();
 
+            DirtSurface.KeepSamples = true;   // the reach check needs each dirt cell's point and normal
+            int stuckJobs = 0;
             for (int i = 0; i < JobDefs.All.Length; i++)
             {
                 float bt = StartJob(i);
@@ -701,7 +706,15 @@ namespace Banjjak
                 var top = new List<string>();
                 for (int k = 0; k < Mathf.Min(5, hid.Count); k++) top.Add($"{hid[k].n} {hid[k].h * 100f / (hid[k].h + hid[k].t):0}% ({hid[k].h})");
                 testLog.AppendLine($"  unreachable left out: {hidAll} cells; most: {(top.Count == 0 ? "none" : string.Join(", ", top))}");
+                // the lift is free only in the tower; elsewhere it's a $2,400 purchase, so every other job has to be
+                // finishable without it (crouching, standing, jumping, steps and platforms only)
+                if (ReachCheck.Run(Job, testLog, reachBakeDir, Job.FreeLift).Count > 0) stuckJobs++;
+                yield return null;
             }
+            if (reachBakeDir != null) testLog.AppendLine($"reach bake written to {reachBakeDir}" + (stuckJobs > 0 ? $" ({stuckJobs} job(s) FAILED)" : ""));
+            else testLog.AppendLine($"reach check: {(stuckJobs == 0 ? $"all {JobDefs.All.Length} jobs can reach 100%" : stuckJobs + " job(s) have surfaces that can't be finished")}");
+            DirtSurface.KeepSamples = false;
+            CleanJob.UseReachBake = true;
 
             // tower: inside the 2nd floor, then the lift against the front wall
             Player.SetPose(new Vector3(-1, 3.52f, -5.2f), 200, 8);

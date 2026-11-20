@@ -26,11 +26,31 @@ namespace Banjjak
         [System.NonSerialized] public float[] Foam, Soak;
         [System.NonSerialized] public byte[] AgentId;
         [System.NonSerialized] public int Total, Remaining, Allow;
-        [System.NonSerialized] public int ContactHidden;   // cells left out because something sits right in front of them
+        [System.NonSerialized] public int ContactHidden;   // cells left out because the spray can't get at them
         [System.NonSerialized] public bool Done;
+        /// <summary>World points and normals of each dirt cell, up to one per face it spans (reach check only).</summary>
+        [System.NonSerialized] public Dictionary<int, List<(Vector3 p, Vector3 n)>> Samples;
+        public static bool KeepSamples;
 
-        /// <summary>A face with another collider closer than this along its normal can't be reached by the spray.</summary>
-        public const float ReachGap = .08f;
+        void AddSample(int k, Vector3 p, Vector3 n)
+        {
+            if (!Samples.TryGetValue(k, out var l)) Samples[k] = l = new List<(Vector3, Vector3)>(1);
+            if (l.Count >= 4) return;
+            foreach (var e in l) if (Vector3.Dot(e.n, n) > .85f) return;
+            l.Add((p, n));
+        }
+
+        /// <summary>Number of dirt cells, used to check a reach bake still matches this surface.</summary>
+        public int DirtCellCount() { int c = 0; for (int k = 0; k < N; k++) if (Surf[k] == 2) c++; return c; }
+
+        /// <summary>Leave out cells the spray can never reach from anywhere the player can stand (see ReachCheck).</summary>
+        public void HideCells(int[] cells)
+        {
+            foreach (int k in cells)
+                if (k >= 0 && k < N && Surf[k] == 2) { Surf[k] = 1; DirtAmt[k] = 0; ContactHidden++; }
+            Total = 0;
+            RecountFromDirt();
+        }
         [System.NonSerialized] public bool TexDirty;
 
         Texture3D tex, ttex;
@@ -90,21 +110,8 @@ namespace Banjjak
             foreach (var o in occ)
                 if (o.Owner != myId && (!o.GroundOnly || IsGround) && o.Bounds.Intersects(wbx)) rel.Add(o);
 
-            // Faces pressed against something else (a wall, a neighbour, a bush) can never be sprayed, so they get no
-            // dirt. Only colliders near this surface are worth a ray test.
-            var near = new List<Bounds>();
-            if (!IsGround)
-                foreach (var c in Physics.OverlapBox(wbx.center, wbx.extents, Quaternion.identity, Layers.SprayMask, QueryTriggerInteraction.Ignore))
-                    if (c.gameObject != gameObject) { var b = c.bounds; b.Expand(ReachGap * 2 + .02f); near.Add(b); }
-            bool Blocked(Vector3 p, Vector3 n)
-            {
-                bool close = false;
-                foreach (var b in near) if (b.Contains(p)) { close = true; break; }
-                if (!close) return false;
-                return Physics.Raycast(p + n * .004f, n, out var hit, ReachGap, Layers.SprayMask, QueryTriggerInteraction.Ignore)
-                    && hit.collider.gameObject != gameObject;
-            }
-            var contact = new List<int>();
+            ContactHidden = 0;
+            if (KeepSamples) Samples = new Dictionary<int, List<(Vector3 p, Vector3 n)>>();
 
             var rng = new Rng(Noise.HashStr(Job.Id) + (uint)(Seed * 7919));
             // pattern seed per object, so neighbouring zones of one floor join without a seam
@@ -134,19 +141,23 @@ namespace Banjjak
                     int y = Mathf.Clamp(Mathf.FloorToInt((P.y - G0.y) / CellSize), 0, Ny - 1);
                     int z = Mathf.Clamp(Mathf.FloorToInt((P.z - G0.z) / CellSize), 0, Nz - 1);
                     int k = x + Nx * (y + Ny * z);
-                    if (Surf[k] == 2) continue;
+                    if (Surf[k] == 2 && Samples == null) continue;
                     var PW = mw.MultiplyPoint3x4(P);
                     bool hidden = (!IsGround && PW.y < .03f) || (NW.y < -.6f && PW.y < 1.05f) || (NW.y > .5f && PW.y > G.HighY && !highOK);
                     if (!hidden) foreach (var o in rel) if (o.Contains(PW)) { hidden = true; break; }
-                    if (!hidden && near.Count > 0 && Blocked(PW, NW)) { hidden = true; if (Surf[k] == 0) contact.Add(k); }
+                    if (Surf[k] == 2)
+                    {
+                        // reach check only: a cell on an edge also gets a point on its other face
+                        if (!hidden) AddSample(k, PW, NW);
+                        continue;
+                    }
                     if (hidden) { if (Surf[k] == 0) Surf[k] = 1; continue; }
                     Surf[k] = 2;
+                    if (Samples != null) AddSample(k, PW, NW);
                     var gd = DirtPatterns.Gen(spec, PW, NW, (PW.y - y0) / ys, seed);
                     DirtAmt[k] = gd.amt; Type[k] = gd.type;
                 }
             }
-            ContactHidden = 0;
-            foreach (int k in contact) if (Surf[k] == 1) ContactHidden++;
             Dilate();
             RecountFromDirt();
             CreateTextures();

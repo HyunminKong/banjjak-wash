@@ -42,6 +42,11 @@ PC의 크롬이나 엣지에서 키보드와 마우스로 플레이해요. 처�
 - 에디터 메뉴 `반짝 워시` → `Windows 빌드` 또는 `웹(WebGL) 빌드`
 - 처음 열 때는 `반짝 워시` → `프로젝트 설정 다시 적용`, `텍스처 다시 굽기`를 한 번 실행해 주세요.
 - 모든 모델과 텍스처는 코드로 만들어요 (`Assets/Scripts/Build`).
+- 물줄기가 닿지 않는 면(벽에 붙은 면, 경사로 아래, 문 뒷면 등)은 때에서 빠져요. 현장마다 미리 계산한 목록이 `Assets/Resources/Reach`에 있어요. 맵을 고쳤으면 Windows 빌드 후 아래처럼 다시 만들고 한 번 더 빌드하세요. 3층 상가 말고는 고소 작업대 없이 닿는 곳만 남겨요.
+  ```
+  Build\Windows\BanjjakWash.exe -autotest <결과 폴더> -bakereach Assets\Resources\Reach -screen-fullscreen 0
+  ```
+  자동 테스트(`-autotest`만)는 현장마다 100%까지 닦을 수 있는지 검사해서 `autotest.log`에 적어요.
 - 계정 저장은 Supabase를 써요. 내 프로젝트로 바꾸려면:
   1. SQL Editor에서 `Supabase/setup.sql`을 실행해요.
   2. Authentication → Sign In / Providers 맨 위 **User Signups**에서 **Confirm email**을 끄고 Save changes를 눌러요. 아이디를 가짜 이메일(`아이디@players.banjjak.game`)로 바꿔 가입시키기 때문에 확인 메일을 받을 수 없어요.
